@@ -1,4 +1,4 @@
-"""Orquestrador do ciclo: varredura, extração concorrente, vetorização em lote e exportação."""
+"""Orquestrador do ciclo: varredura direcionada, extração concorrente, vetorização em lote e exportação."""
 
 import concurrent.futures
 from datetime import datetime
@@ -17,53 +17,55 @@ def executar_pipeline() -> None:
     nome_json = f"noticias_{ts}.json"
     nome_excel = f"noticias_{ts}.xlsx"
 
+    # Inicialização da lista de matérias brutas
     raw_articles = []
+
     print(
         f"Iniciando varredura RSS em {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}...",
         flush=True,
     )
 
-    # Trecho da coleta no main.py
-for tema, dict_idiomas in config.MONITORAMENTOS.items():
-  print(f">> Tema: {tema}", flush=True)
-  for mercado in config.MERCADOS_ALVO:
-    gl = mercado["gl"]
-    hl = mercado["hl"]
-    lang = mercado["lang"]
+    # 1. Varredura direcionada por tema, mercado e idioma nativo
+    for tema, dict_idiomas in config.MONITORAMENTOS.items():
+        print(f">> Tema: {tema}", flush=True)
+        for mercado in config.MERCADOS_ALVO:
+            gl = mercado["gl"]
+            hl = mercado["hl"]
+            lang = mercado["lang"]
 
-    termos = dict_idiomas.get(lang, [])
-    # Recupera a lista de termos excluídos para a língua atual
-    termos_excluidos_idioma = config.TERMOS_EXCLUIDOS.get(lang, [])
+            termos = dict_idiomas.get(lang, [])
+            termos_excluidos_idioma = config.TERMOS_EXCLUIDOS.get(lang, [])
 
-    for termo in termos:
-      query = processor.build_rss_query(
-          base_term=termo,
-          excluded_terms=termos_excluidos_idioma,
-          period=config.PERIODO_BUSCA,
-          preferred_domains=config.DOMINIOS_PREFERENCIAIS,
-      )
-      itens = processor.fetch_rss_feed(query, hl=hl, gl=gl)
-      for item in itens:
-        item["tema"] = tema
-        item["termo_origem"] = termo
-        item["pais_emissao"] = gl
-        item["idioma"] = hl
-        raw_articles.append(item)
+            for termo in termos:
+                query = processor.build_rss_query(
+                    base_term=termo,
+                    excluded_terms=termos_excluidos_idioma,
+                    period=config.PERIODO_BUSCA,
+                    preferred_domains=config.DOMINIOS_PREFERENCIAIS,
+                )
+                itens = processor.fetch_rss_feed(query, hl=hl, gl=gl)
+                for item in itens:
+                    item["tema"] = tema
+                    item["termo_origem"] = termo
+                    item["pais_emissao"] = gl
+                    item["idioma"] = hl
+                    raw_articles.append(item)
 
     print(f"Total bruto coletado: {len(raw_articles)} matérias.", flush=True)
 
+    # 2. Agrupamento e deduplicação semântica no dia
     clusters = processor.cluster_articles(
         raw_articles,
         similarity_threshold=config.SIMILARIDADE_REDUNDANCIA,
     )
 
-    # 1. Extração concorrente pura de I/O de rede (8 workers)
+    # 3. Extração concorrente pura de rede (8 workers)
     def worker(cluster_item):
         time.sleep(random.uniform(0.1, 0.4))
         return processor.process_cluster_with_fallback(cluster_item)
 
     processed_results = []
-    max_workers = 8  # Aumentado para acelerar download
+    max_workers = getattr(config, "MAX_WORKERS_PARALELO", 8)
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=max_workers
     ) as executor:
@@ -79,13 +81,14 @@ for tema, dict_idiomas in config.MONITORAMENTOS.items():
                 flush=True,
             )
 
-    # 2. Vetorização de alta performance em lote (executa em ~15 a 20 segundos)
+    # 4. Vetorização de alta performance em lote (BGE-M3 1024d)
     processor.gerar_vetores_em_lote(processed_results)
 
-    # 3. Exportação dos arquivos JSON e Excel
+    # 5. Exportação do JSON estruturado para a Fase 2
     with open(nome_json, "w", encoding="utf-8") as f:
         json.dump(processed_results, f, ensure_ascii=False, indent=2)
 
+    # 6. Exportação do Excel estruturado para conferência dos analistas
     linhas_excel = []
     for r in processed_results:
         linhas_excel.append({
@@ -112,7 +115,7 @@ for tema, dict_idiomas in config.MONITORAMENTOS.items():
     )
     bloqueados = len(processed_results) - sucessos
 
-    # 4. Despacho no Telegram
+    # 7. Despacho duplo no Telegram (JSON + Excel)
     enviar_telegram(
         arquivos=[nome_json, nome_excel],
         total_brutas=len(raw_articles),
