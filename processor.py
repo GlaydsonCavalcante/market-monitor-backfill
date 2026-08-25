@@ -1,4 +1,4 @@
-"""Módulo de processamento RSS, desduplicação e vetorização com BAAI/bge-m3."""
+"""Módulo de processamento RSS, desduplicação e vetorização em lote com BAAI/bge-m3."""
 
 import base64
 from datetime import datetime
@@ -10,7 +10,6 @@ from bs4 import BeautifulSoup
 from config import MODELO_EMBEDDING_1024, USER_AGENTS
 from googlenewsdecoder import new_decoderv1
 import numpy as np
-from rapidfuzz import fuzz
 import requests
 from sentence_transformers import SentenceTransformer
 import trafilatura
@@ -19,7 +18,7 @@ _EMBEDDER_SINGLETON = None
 
 
 def get_embedder():
-    """Inicializa e mantém o modelo BGE-M3 em memória."""
+    """Carrega o modelo BGE-M3 em memória (Singleton)."""
     global _EMBEDDER_SINGLETON
     if _EMBEDDER_SINGLETON is None:
         print(f"Carregando {MODELO_EMBEDDING_1024} (1024d)...", flush=True)
@@ -28,7 +27,7 @@ def get_embedder():
 
 
 def extrair_lead_limpo(texto: str, max_chars: int = 1200) -> str:
-    """Higieniza o texto raspado removendo anúncios, chamadas e links quebrados."""
+    """Higieniza o texto raspado removendo anúncios e chamadas de navegação."""
     if not texto or texto == "[CONTEUDO_BLOQUEADO]":
         return ""
 
@@ -84,7 +83,7 @@ def fetch_rss_feed(query: str, hl: str, gl: str) -> list:
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl={hl}&gl={gl}&ceid={ceid}"
     headers = {"User-Agent": random.choice(USER_AGENTS)}
     try:
-        response = requests.get(url, headers=headers, timeout=12)
+        response = requests.get(url, headers=headers, timeout=8)
         if response.status_code != 200:
             return []
         root = ET.fromstring(response.content)
@@ -163,24 +162,6 @@ def resolve_publisher_url(google_news_url: str) -> str:
                 return decoded
     except Exception:
         pass
-    try:
-        headers = {"User-Agent": random.choice(USER_AGENTS)}
-        resp = requests.get(google_news_url, headers=headers, timeout=6)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, "html.parser")
-            canonical = soup.find("link", rel="canonical")
-            if (
-                canonical
-                and canonical.get("href")
-                and "google.com" not in canonical["href"]
-            ):
-                return canonical["href"]
-            for a in soup.find_all("a", href=True):
-                href = a["href"]
-                if href.startswith("http") and "google.com" not in href:
-                    return href
-    except Exception:
-        pass
     return google_news_url
 
 
@@ -196,7 +177,7 @@ def scrape_article_text(url: str) -> tuple:
             ),
             "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7,es;q=0.6",
         }
-        resp = requests.get(real_url, headers=headers, timeout=12)
+        resp = requests.get(real_url, headers=headers, timeout=7)
         if resp.status_code != 200:
             return None, f"FALHA_HTTP_{resp.status_code}", real_url
         html_content = resp.text
@@ -235,7 +216,7 @@ def cluster_articles(raw_articles: list, similarity_threshold: float = 0.73) -> 
     titulos = [a["titulo"] for a in raw_articles]
     embeddings = embedder.encode(
         titulos,
-        batch_size=32,
+        batch_size=64,
         show_progress_bar=False,
         convert_to_numpy=True,
         normalize_embeddings=True,
@@ -282,19 +263,8 @@ def cluster_articles(raw_articles: list, similarity_threshold: float = 0.73) -> 
     return clusters
 
 
-def gerar_vetor_1024(titulo: str, texto_completo: str) -> list:
-    """Gera o vetor denso de 1024d sobre Título + Lead Higienizado (até 1200 caracteres)."""
-    embedder = get_embedder()
-    lead = extrair_lead_limpo(texto_completo, max_chars=1200)
-    input_text = f"{titulo}. {lead}".strip() if lead else titulo
-    vetor = embedder.encode(
-        input_text, convert_to_numpy=True, normalize_embeddings=True
-    )
-    return vetor.tolist()
-
-
 def process_cluster_with_fallback(cluster: dict) -> dict:
-    """Processa a extração do cluster e anexa o vetor 1024d."""
+    """Processa a extração de texto (sem vetorização unitária para não travar a CPU)."""
     urls_to_try = [cluster["url_primaria"]] + cluster["urls_espelho"]
     historico = []
     espelhos_decodificados = [
@@ -326,7 +296,6 @@ def process_cluster_with_fallback(cluster: dict) -> dict:
                 "urls_espelho_disponiveis": espelhos_decodificados,
                 "status_extracao": "SUCESSO",
                 "texto_completo": texto,
-                "vetor_1024": gerar_vetor_1024(cluster["titulo"], texto),
                 "motivo_bloqueio": None,
                 "necessita_extracao_manual": False,
                 "historico_tentativas": historico,
@@ -348,11 +317,42 @@ def process_cluster_with_fallback(cluster: dict) -> dict:
         "urls_espelho_disponiveis": espelhos_decodificados,
         "status_extracao": "BLOQUEADO",
         "texto_completo": "[CONTEUDO_BLOQUEADO]",
-        "vetor_1024": gerar_vetor_1024(cluster["titulo"], ""),
         "motivo_bloqueio": (
-            f"Acesso bloqueado ou indisponível em todas as {len(urls_to_try)}"
+            f"Acesso protegido ou indisponível em todas as {len(urls_to_try)}"
             " fontes testadas."
         ),
         "necessita_extracao_manual": True,
         "historico_tentativas": historico,
     }
+
+
+def gerar_vetores_em_lote(processed_results: list) -> None:
+    """Calcula os vetores 1024d de todos os clusters de uma só vez em matriz vetorial paralela."""
+    embedder = get_embedder()
+    textos_para_vetorizar = []
+
+    for r in processed_results:
+        texto = r.get("texto_completo", "")
+        lead = (
+            extrair_lead_limpo(texto, max_chars=1200)
+            if r.get("status_extracao") == "SUCESSO"
+            else ""
+        )
+        trecho_final = f"{r['titulo']}. {lead}".strip() if lead else r["titulo"]
+        textos_para_vetorizar.append(trecho_final)
+
+    print(
+        f"Vetorizando {len(textos_para_vetorizar)} itens em lote com BGE-M3...",
+        flush=True,
+    )
+    vetores = embedder.encode(
+        textos_para_vetorizar,
+        batch_size=32,
+        show_progress_bar=False,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
+
+    for i, r in enumerate(processed_results):
+        r["vetor_1024"] = vetores[i].tolist()
+    print("Vetorização em lote concluída com sucesso.", flush=True)
