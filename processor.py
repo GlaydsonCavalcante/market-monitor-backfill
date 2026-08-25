@@ -13,6 +13,8 @@ from rapidfuzz import fuzz
 import requests
 from sentence_transformers import SentenceTransformer
 import trafilatura
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from config import USER_AGENTS
 
@@ -266,3 +268,19 @@ def process_cluster_with_fallback(cluster: dict) -> dict:
         "necessita_extracao_manual": True,
         "historico_tentativas": historico,
     }
+
+def criar_sessao_http() -> requests.Session:
+    """Cria uma sessão HTTP com pooling de conexões e retentativas automáticas."""
+    sessao = requests.Session()
+    estrategia_retry = Retry(
+        total=3,
+        backoff_factor=0.5,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"]
+    )
+    adaptador = HTTPAdapter(max_retries=estrategia_retry, pool_connections=10, pool_maxsize=10)
+    sessao.mount("http://", adaptador)
+    sessao.mount("https://", adaptador)
+    return sessao
+
+SESSAO_GLOBAL = criar_sessao_http()
