@@ -1,0 +1,32 @@
+name: Pipeline de Monitoramento de Mercado
+
+on:
+  schedule:
+    # Executa todos os dias às 03:00 UTC (00:00 Horário de Brasília)
+    - cron: '0 3 * * *'
+  workflow_dispatch: # Habilita o botão para execução manual a qualquer momento
+
+jobs:
+  executar-monitoramento:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar ambiente Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar bibliotecas necessárias
+        run: |
+          pip install requests pandas trafilatura rapidfuzz sentence-transformers googlenewsdecoder beautifulsoup4
+
+      - name: Executar rotina de monitoramento
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
