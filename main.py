@@ -462,53 +462,65 @@ def enviar_telegram(
     sucessos: int,
     bloqueados: int,
 ) -> None:
-    """Dispara o arquivo final gerado e o resumo da execução para o Telegram.
-
-    Args:
-        caminho_arquivo: Caminho do arquivo JSON consolidado.
-        total_brutas: Quantidade total de matérias brutas coletadas via RSS.
-        total_clusters: Quantidade de clusters únicos gerados pela IA.
-        total_processadas: Total de registros finais processados.
-        sucessos: Matérias com texto integral extraído com sucesso.
-        bloqueados: Matérias bloqueadas por paywall ou proteção.
-    """
+    """Dispara o arquivo e resumo analítico com captura detalhada de logs de erro."""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_ids_raw = os.getenv("TELEGRAM_CHAT_ID")
 
     if not bot_token or not chat_ids_raw:
-        print("TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID ausentes no ambiente.")
+        print("❌ TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID ausentes no ambiente.")
         return
 
     chat_ids = [c.strip() for c in chat_ids_raw.split(",") if c.strip()]
     url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
 
-    # Montagem do relatório com o mesmo padrão exibido em tela
     taxa_sucesso = (
         (sucessos / total_processadas * 100) if total_processadas > 0 else 0
     )
     resumo_msg = (
-        "<b>RELATÓRIO DE MONITORAMENTO DE MERCADO</b>\n\n"
-        f"• <b>Data/Hora:</b> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
-        f"• <b>Matérias Brutas Coletadas:</b> {total_brutas}\n"
-        f"• <b>Clusters Únicos (Deduplicação):</b> {total_clusters}\n"
-        f"• <b>Total de Notícias Únicas:</b> {total_processadas}\n"
-        f"• <b>Textos Completos Extraídos:</b> {sucessos} ({taxa_sucesso:.1f}%)\n"
-        f"• <b>Necessitam Busca Manual (Bloqueadas):</b> {bloqueados}\n"
-        f"• <b>Arquivo Gerado:</b> <code>{os.path.basename(caminho_arquivo)}</code>"
+        "📊 <b>RELATÓRIO DE MONITORAMENTO DE MERCADO</b>\n\n"
+        f"• <b>Data:</b> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
+        f"• <b>Matérias Brutas:</b> {total_brutas}\n"
+        f"• <b>Clusters Únicos:</b> {total_clusters}\n"
+        f"• <b>Total Processado:</b> {total_processadas}\n"
+        f"• <b>Textos Extraídos:</b> {sucessos} ({taxa_sucesso:.1f}%)\n"
+        f"• <b>Bloqueadas / Manuais:</b> {bloqueados}\n"
+        f"• <b>Arquivo:</b> <code>{os.path.basename(caminho_arquivo)}</code>"
     )
 
     for chat_id in chat_ids:
-        with open(caminho_arquivo, "rb") as doc:
-            payload = {
-                "chat_id": chat_id,
-                "caption": resumo_msg,
-                "parse_mode": "HTML",
-            }
-            files = {"document": doc}
-            resp = requests.post(url, data=payload, files=files, timeout=60)
-            resp.raise_for_status()
-            print(f"Relatório e anexo entregues para: {chat_id}")
+        print(f"Tentando envio para o Chat ID: {chat_id}...")
+        try:
+            with open(caminho_arquivo, "rb") as doc:
+                payload = {
+                    "chat_id": chat_id,
+                    "caption": resumo_msg,
+                    "parse_mode": "HTML",
+                }
+                files = {"document": doc}
+                resp = requests.post(url, data=payload, files=files, timeout=60)
 
+                if resp.status_code == 200:
+                    print(f"✅ Arquivo entregue com sucesso para: {chat_id}")
+                else:
+                    print(f"⚠️ Telegram recusou com status {resp.status_code}:")
+                    print(f"   Resposta da API: {resp.text}")
+
+                    # Fallback: tenta envio sem formatação HTML caso haja caractere especial conflitante
+                    print("   Tentando envio simples sem HTML...")
+                    payload["parse_mode"] = ""
+                    doc.seek(0)
+                    resp_fallback = requests.post(
+                        url, data=payload, files=files, timeout=60
+                    )
+                    if resp_fallback.status_code == 200:
+                        print(f"✅ Entregue via fallback para: {chat_id}")
+                    else:
+                        print(
+                            f"❌ Falha definitiva no envio: {resp_fallback.text}"
+                        )
+
+        except Exception as err:
+            print(f"❌ Erro de conexão/execução para {chat_id}: {err}")
 
 # ==========================================
 # EXECUÇÃO PRINCIPAL (FLUXO COMPLETO)
