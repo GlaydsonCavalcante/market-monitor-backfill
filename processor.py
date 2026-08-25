@@ -7,7 +7,7 @@ import re
 import urllib.parse
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
-from config import MODELO_EMBEDDING_1024, USER_AGENTS
+from config import MODELO_EMBEDDING_1024, TERMOS_DESCARTE_TEXTO, USER_AGENTS
 from googlenewsdecoder import new_decoderv1
 import numpy as np
 import requests
@@ -25,38 +25,32 @@ def get_embedder():
         _EMBEDDER_SINGLETON = SentenceTransformer(MODELO_EMBEDDING_1024)
     return _EMBEDDER_SINGLETON
 
+# Pré-compilação de uma lista plana para checagem rápida e ampla
+TODOS_TERMOS_DESCARTE = [
+    termo.lower()
+    for lista in TERMOS_DESCARTE_TEXTO.values()
+    for termo in lista
+]
 
 def extrair_lead_limpo(texto: str, max_chars: int = 1200) -> str:
-    """Higieniza o texto raspado removendo anúncios e chamadas de navegação."""
-    if not texto or texto == "[CONTEUDO_BLOQUEADO]":
-        return ""
+  """Higieniza o texto raspado removendo anúncios e chamadas de navegação multilíngues."""
+  if not texto or texto == "[CONTEUDO_BLOQUEADO]":
+    return ""
 
-    termos_descarte = [
-        "leia mais",
-        "inscreva-se",
-        "compartilhe",
-        "publicidade",
-        "todos os direitos reservados",
-        "foto:",
-        "crédito:",
-        "veja também",
-        "redação",
-        "clique aqui",
-        "newsletter",
-    ]
+  linhas_validas = []
+  for linha in texto.split("\n"):
+    l = linha.strip()
+    # Descarta linhas muito curtas (títulos de menus, botões)
+    if len(l) < 25:
+      continue
+    # Descarta se contiver qualquer termo da lista global de descarte
+    l_lower = l.lower()
+    if any(termo in l_lower for termo in TODOS_TERMOS_DESCARTE):
+      continue
+    linhas_validas.append(l)
 
-    linhas_validas = []
-    for linha in texto.split("\n"):
-        l = linha.strip()
-        if len(l) < 25:
-            continue
-        if any(termo in l.lower() for termo in termos_descarte):
-            continue
-        linhas_validas.append(l)
-
-    texto_higienizado = " ".join(linhas_validas)
-    return texto_higienizado[:max_chars].strip()
-
+  texto_higienizado = " ".join(linhas_validas)
+  return texto_higienizado[:max_chars].strip()
 
 def build_rss_query(
     base_term: str,
