@@ -1,7 +1,9 @@
 requests
 pandas
+openpyxl
 trafilatura
 rapidfuzz
 sentence-transformers
 googlenewsdecoder
 beautifulsoup4
+numpy
