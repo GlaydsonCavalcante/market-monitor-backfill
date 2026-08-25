@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [latam, anglo, europa, asia]
+        shard: [latam, anglo, europa, asia, mea]
 
     steps:
       - name: Baixar codigo do repositorio
@@ -24,6 +24,7 @@ jobs:
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
+          df -h
 
       - name: Configurar ambiente Python
         uses: actions/setup-python@v5
