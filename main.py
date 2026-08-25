@@ -177,46 +177,55 @@ def fetch_rss_feed(query: str, hl: str, gl: str) -> list:
 def cluster_articles(
     raw_articles: list, similarity_threshold: float = 0.88
 ) -> list:
-    """Agrupa notícias similares em clusters via embeddings multilingues e fuzzy matching."""
+    """Agrupa notícias similares com alta performance computacional."""
     if not raw_articles:
         return []
 
-    print("Carregando modelo de similaridade semântica para agrupamento...")
+    print(
+        f"Processando deduplicação semântica de {len(raw_articles)} matérias...",
+        flush=True,
+    )
     model = SentenceTransformer(
         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
 
     titles = [a["titulo"] for a in raw_articles]
     embeddings = model.encode(
-        titles, convert_to_numpy=True, normalize_embeddings=True
+        titles,
+        batch_size=64,
+        show_progress_bar=False,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
     )
 
     clusters = []
     visited = set()
+    total = len(raw_articles)
 
-    for i in range(len(raw_articles)):
+    for i in range(total):
         if i in visited:
             continue
 
         cluster_members = [raw_articles[i]]
         visited.add(i)
 
-        for j in range(i + 1, len(raw_articles)):
+        for j in range(i + 1, total):
             if j in visited:
                 continue
 
-            fuzzy_sim = fuzz.token_set_ratio(titles[i], titles[j]) / 100.0
+            # Cálculo de produto escalar rápido (cosseno)
             cosine_sim = float(np.dot(embeddings[i], embeddings[j]))
 
-            # Critério duplo para evitar agrupar notícias distintas sobre o mesmo tema geral
-            if (
-                cosine_sim >= similarity_threshold and fuzzy_sim >= 0.80
-            ) or fuzzy_sim >= 0.92:
-                cluster_members.append(raw_articles[j])
-                visited.add(j)
+            # Só calcula fuzzy match pesado se a similaridade do cosseno for próxima
+            if cosine_sim >= (similarity_threshold - 0.10):
+                fuzzy_sim = fuzz.token_set_ratio(titles[i], titles[j]) / 100.0
+                if (
+                    cosine_sim >= similarity_threshold and fuzzy_sim >= 0.80
+                ) or fuzzy_sim >= 0.92:
+                    cluster_members.append(raw_articles[j])
+                    visited.add(j)
 
         primary = cluster_members[0]
-        # Limita espelhos a no máximo 2 para evitar sobrecarga de requisições
         mirrors = [
             m["link"]
             for m in cluster_members[1:3]
@@ -238,6 +247,10 @@ def cluster_articles(
             "pais_emissao": primary["pais_emissao"],
             "idioma": primary["idioma"],
         })
+
+    print(
+        f"Deduplicação concluída: {len(clusters)} clusters gerados.", flush=True
+    )
     return clusters
 
 
