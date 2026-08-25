@@ -150,16 +150,92 @@ MERCADOS_ALVO = [
 ]
 
 PERIODO_BUSCA = "1d"
-TERMOS_EXCLUIDOS = [
-    "esporte",
-    "futebol",
-    "celebridade",
-    "horóscopo",
-    "receita",
-    "novela",
-    "sorteio",
-    "loto",
-]
+# Termos de exclusão e filtragem de ruído categorizados por idioma
+TERMOS_EXCLUIDOS = {
+    "pt": [
+        "esporte",
+        "futebol",
+        "celebridade",
+        "horóscopo",
+        "receita",
+        "novela",
+        "sorteio",
+        "loto",
+        "loteria",
+    ],
+    "en": [
+        "sports",
+        "football",
+        "soccer",
+        "celebrity",
+        "horoscope",
+        "recipe",
+        "lottery",
+        "gossip",
+        "sweepstakes",
+    ],
+    "es": [
+        "deporte",
+        "fútbol",
+        "celebridad",
+        "horóscopo",
+        "receta",
+        "telenovela",
+        "sorteo",
+        "lotería",
+    ],
+    "fr": [
+        "sport",
+        "football",
+        "célébrité",
+        "horoscope",
+        "recette",
+        "loterie",
+        "concours",
+    ],
+    "de": [
+        "Sport",
+        "Fußball",
+        "Promi",
+        "Horoskop",
+        "Rezept",
+        "Lotterie",
+        "Gewinnspiel",
+    ],
+    "zh": [
+        "体育",
+        "足球",
+        "明星",
+        "八卦",
+        "星座",
+        "食谱",
+        "彩票",
+    ],
+    "ja": [
+        "スポーツ",
+        "サッカー",
+        "芸能人",
+        "占い",
+        "レシピ",
+        "宝くじ",
+    ],
+    "ko": [
+        "스포츠",
+        "축구",
+        "연예인",
+        "운세",
+        "레시피",
+        "복권",
+    ],
+    "hi": [
+        "खेल",
+        "फुटबॉल",
+        "सेलिब्रिटी",
+        "राशिफल",
+        "नुस्खा",
+        "लॉटरी",
+    ],
+}
 DOMINIOS_PREFERENCIAIS = []
 MODELO_EMBEDDING_1024 = "BAAI/bge-m3"
 SIMILARIDADE_REDUNDANCIA = 0.73
