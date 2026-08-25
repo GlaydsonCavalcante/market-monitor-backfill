@@ -21,6 +21,12 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
+      - name: Cache do Modelo de IA
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: ${{ runner.os }}-hf-minilm-l12
+          
       - name: Instalar bibliotecas
         run: pip install -r requirements.txt
 
