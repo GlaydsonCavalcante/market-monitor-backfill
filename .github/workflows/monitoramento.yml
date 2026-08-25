@@ -2,8 +2,8 @@ name: Pipeline de Monitoramento de Mercado
 
 on:
   schedule:
-    # Execução diária às 06:00 UTC (03:00 Horário de Brasília)
-    - cron: '0 6 * * *'
+    # Execução diária às 10:00 UTC (07:00 Horário de Brasília)
+    - cron: '0 10 * * *'
   workflow_dispatch: # Permite disparo manual
 
 jobs:
@@ -25,7 +25,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: ${{ runner.os }}-hf-minilm-l12
+          key: ${{ runner.os }}-hf-bge-m3
           
       - name: Instalar bibliotecas
         run: pip install -r requirements.txt
