@@ -1,4 +1,4 @@
-"""Módulo de processamento técnico: RSS, deduplicação por IA e extração de páginas."""
+"""Módulo de processamento RSS, desduplicação e vetorização com BAAI/bge-m3."""
 
 import base64
 from datetime import datetime
@@ -7,25 +7,71 @@ import re
 import urllib.parse
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
+from config import MODELO_EMBEDDING_1024, USER_AGENTS
 from googlenewsdecoder import new_decoderv1
 import numpy as np
 from rapidfuzz import fuzz
 import requests
 from sentence_transformers import SentenceTransformer
 import trafilatura
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
-from config import USER_AGENTS
+_EMBEDDER_SINGLETON = None
 
 
-def build_rss_query(base_term: str, excluded_terms: list, period: str, preferred_domains: list) -> str:
-    """Monta a query formatada para o Google Notícias RSS."""
+def get_embedder():
+    """Inicializa e mantém o modelo BGE-M3 em memória."""
+    global _EMBEDDER_SINGLETON
+    if _EMBEDDER_SINGLETON is None:
+        print(f"Carregando {MODELO_EMBEDDING_1024} (1024d)...", flush=True)
+        _EMBEDDER_SINGLETON = SentenceTransformer(MODELO_EMBEDDING_1024)
+    return _EMBEDDER_SINGLETON
+
+
+def extrair_lead_limpo(texto: str, max_chars: int = 1200) -> str:
+    """Higieniza o texto raspado removendo anúncios, chamadas e links quebrados."""
+    if not texto or texto == "[CONTEUDO_BLOQUEADO]":
+        return ""
+
+    termos_descarte = [
+        "leia mais",
+        "inscreva-se",
+        "compartilhe",
+        "publicidade",
+        "todos os direitos reservados",
+        "foto:",
+        "crédito:",
+        "veja também",
+        "redação",
+        "clique aqui",
+        "newsletter",
+    ]
+
+    linhas_validas = []
+    for linha in texto.split("\n"):
+        l = linha.strip()
+        if len(l) < 25:
+            continue
+        if any(termo in l.lower() for termo in termos_descarte):
+            continue
+        linhas_validas.append(l)
+
+    texto_higienizado = " ".join(linhas_validas)
+    return texto_higienizado[:max_chars].strip()
+
+
+def build_rss_query(
+    base_term: str,
+    excluded_terms: list,
+    period: str,
+    preferred_domains: list,
+) -> str:
     parts = [base_term]
     if period:
         parts.append(f"when:{period}")
     if preferred_domains:
-        sites_query = " OR ".join([f"site:{domain}" for domain in preferred_domains])
+        sites_query = " OR ".join(
+            [f"site:{domain}" for domain in preferred_domains]
+        )
         parts.append(f"({sites_query})")
     if excluded_terms:
         parts.extend([f"-{term}" for term in excluded_terms])
@@ -33,26 +79,40 @@ def build_rss_query(base_term: str, excluded_terms: list, period: str, preferred
 
 
 def fetch_rss_feed(query: str, hl: str, gl: str) -> list:
-    """Consulta o Google News RSS e extrai metadados dos artigos."""
     encoded_query = urllib.parse.quote(query)
     ceid = f"{hl.upper()}:{gl.upper()}"
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl={hl}&gl={gl}&ceid={ceid}"
     headers = {"User-Agent": random.choice(USER_AGENTS)}
-
     try:
         response = requests.get(url, headers=headers, timeout=12)
         if response.status_code != 200:
             return []
-
         root = ET.fromstring(response.content)
         feed_items = []
         for item in root.findall(".//channel/item"):
-            title = item.find("title").text if item.find("title") is not None else ""
-            link = item.find("link").text if item.find("link") is not None else ""
-            pub_date = item.find("pubDate").text if item.find("pubDate") is not None else ""
-            source = item.find("source").text if item.find("source") is not None else "Google News"
-            snippet = item.find("description").text if item.find("description") is not None else ""
-
+            title = (
+                item.find("title").text
+                if item.find("title") is not None
+                else ""
+            )
+            link = (
+                item.find("link").text if item.find("link") is not None else ""
+            )
+            pub_date = (
+                item.find("pubDate").text
+                if item.find("pubDate") is not None
+                else ""
+            )
+            source = (
+                item.find("source").text
+                if item.find("source") is not None
+                else "Google News"
+            )
+            snippet = (
+                item.find("description").text
+                if item.find("description") is not None
+                else ""
+            )
             feed_items.append({
                 "titulo": title.strip(),
                 "link": link.strip(),
@@ -65,16 +125,120 @@ def fetch_rss_feed(query: str, hl: str, gl: str) -> list:
         return []
 
 
-def cluster_articles(raw_articles: list, similarity_threshold: float = 0.88) -> list:
-    """Deduplica e agrupa notícias por similaridade semântica vetorial e léxica."""
+def decode_token_offline(token: str) -> str:
+    try:
+        padded = token + "=" * (-len(token) % 4)
+        raw_bytes = base64.urlsafe_b64decode(padded)
+        matches = re.findall(
+            rb"https?://[a-zA-Z0-9_\-\.\/\?\=\&\%\#\:\@]+", raw_bytes
+        )
+        for url_bytes in matches:
+            url_str = url_bytes.decode("utf-8", errors="ignore")
+            if (
+                "google.com" not in url_str
+                and "schema.org" not in url_str
+                and len(url_str) > 15
+            ):
+                return url_str
+    except Exception:
+        pass
+    return None
+
+
+def resolve_publisher_url(google_news_url: str) -> str:
+    if not google_news_url or "news.google.com" not in google_news_url:
+        return google_news_url
+    clean_url = google_news_url.split("?")[0].strip()
+    match = re.search(r"/articles/([^/?&]+)", clean_url)
+    token = match.group(1) if match else None
+    if token:
+        extracted = decode_token_offline(token)
+        if extracted:
+            return extracted
+    try:
+        res = new_decoderv1(google_news_url)
+        if res.get("status") and res.get("decoded_url"):
+            decoded = res["decoded_url"]
+            if decoded.startswith("http") and "news.google.com" not in decoded:
+                return decoded
+    except Exception:
+        pass
+    try:
+        headers = {"User-Agent": random.choice(USER_AGENTS)}
+        resp = requests.get(google_news_url, headers=headers, timeout=6)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            canonical = soup.find("link", rel="canonical")
+            if (
+                canonical
+                and canonical.get("href")
+                and "google.com" not in canonical["href"]
+            ):
+                return canonical["href"]
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                if href.startswith("http") and "google.com" not in href:
+                    return href
+    except Exception:
+        pass
+    return google_news_url
+
+
+def scrape_article_text(url: str) -> tuple:
+    real_url = resolve_publisher_url(url)
+    if "news.google.com" in real_url:
+        return None, "FALHA_DECODIFICACAO_URL", real_url
+    try:
+        headers = {
+            "User-Agent": random.choice(USER_AGENTS),
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            ),
+            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7,es;q=0.6",
+        }
+        resp = requests.get(real_url, headers=headers, timeout=12)
+        if resp.status_code != 200:
+            return None, f"FALHA_HTTP_{resp.status_code}", real_url
+        html_content = resp.text
+        text = trafilatura.extract(
+            html_content,
+            include_comments=False,
+            include_tables=False,
+            include_links=False,
+            output_format="txt",
+        )
+        if not text or len(text.strip()) < 150:
+            soup = BeautifulSoup(html_content, "html.parser")
+            for tag in soup(
+                ["script", "style", "nav", "header", "footer", "aside", "form"]
+            ):
+                tag.decompose()
+            paragraphs = [
+                p.get_text().strip()
+                for p in soup.find_all("p")
+                if len(p.get_text().strip()) > 35
+            ]
+            text = "\n\n".join(paragraphs)
+
+        if text and len(text.strip()) > 150:
+            return text.strip(), "SUCESSO", real_url
+        return None, "CONTEUDO_INSUFICIENTE", real_url
+    except Exception as exc:
+        return None, f"ERRO_EXCEPTION: {str(exc)}", real_url
+
+
+def cluster_articles(raw_articles: list, similarity_threshold: float = 0.73) -> list:
+    """Agrupa matérias redundantes da coleta utilizando BGE-M3."""
     if not raw_articles:
         return []
-
-    print(f"Processando deduplicação de {len(raw_articles)} matérias com IA...", flush=True)
-    model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    titles = [a["titulo"] for a in raw_articles]
-    embeddings = model.encode(
-        titles, batch_size=64, show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=True
+    embedder = get_embedder()
+    titulos = [a["titulo"] for a in raw_articles]
+    embeddings = embedder.encode(
+        titulos,
+        batch_size=32,
+        show_progress_bar=False,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
     )
 
     clusters = []
@@ -84,26 +248,26 @@ def cluster_articles(raw_articles: list, similarity_threshold: float = 0.88) -> 
     for i in range(total):
         if i in visited:
             continue
-
         cluster_members = [raw_articles[i]]
         visited.add(i)
-
         for j in range(i + 1, total):
             if j in visited:
                 continue
-
-            cosine_sim = float(np.dot(embeddings[i], embeddings[j]))
-            if cosine_sim >= (similarity_threshold - 0.10):
-                fuzzy_sim = fuzz.token_set_ratio(titles[i], titles[j]) / 100.0
-                if (cosine_sim >= similarity_threshold and fuzzy_sim >= 0.80) or fuzzy_sim >= 0.92:
-                    cluster_members.append(raw_articles[j])
-                    visited.add(j)
+            cos_sim = float(np.dot(embeddings[i], embeddings[j]))
+            if cos_sim >= similarity_threshold:
+                cluster_members.append(raw_articles[j])
+                visited.add(j)
 
         primary = cluster_members[0]
-        mirrors = [m["link"] for m in cluster_members[1:3] if m["link"] != primary["link"]]
-
+        mirrors = [
+            m["link"]
+            for m in cluster_members[1:3]
+            if m["link"] != primary["link"]
+        ]
         clusters.append({
-            "id_cluster": f"CLUS_{datetime.now().strftime('%Y%m%d')}_{len(clusters) + 1:04d}",
+            "id_cluster": (
+                f"CLUS_{datetime.now().strftime('%Y%m%d')}_{len(clusters) + 1:04d}"
+            ),
             "tema": primary["tema"],
             "termo_origem": primary["termo_origem"],
             "titulo": primary["titulo"],
@@ -115,118 +279,33 @@ def cluster_articles(raw_articles: list, similarity_threshold: float = 0.88) -> 
             "pais_emissao": primary["pais_emissao"],
             "idioma": primary["idioma"],
         })
-
-    print(f"Deduplicação finalizada: {len(clusters)} temas consolidados.", flush=True)
     return clusters
 
 
-def decode_token_offline(token: str) -> str:
-    """Decodifica URL original via parsing dos bytes do protobuf sem requisição de rede."""
-    try:
-        padded = token + "=" * (-len(token) % 4)
-        raw_bytes = base64.urlsafe_b64decode(padded)
-        matches = re.findall(rb"https?://[a-zA-Z0-9_\-\.\/\?\=\&\%\#\:\@]+", raw_bytes)
-        for url_bytes in matches:
-            url_str = url_bytes.decode("utf-8", errors="ignore")
-            if "google.com" not in url_str and "schema.org" not in url_str and len(url_str) > 15:
-                return url_str
-    except Exception:
-        pass
-    return None
-
-
-def resolve_publisher_url(google_news_url: str) -> str:
-    """Resolve a URL direta do portal de notícias através de camadas de resolução."""
-    if not google_news_url or "news.google.com" not in google_news_url:
-        return google_news_url
-
-    clean_url = google_news_url.split("?")[0].strip()
-    match = re.search(r"/articles/([^/?&]+)", clean_url)
-    token = match.group(1) if match else None
-
-    if token:
-        extracted = decode_token_offline(token)
-        if extracted:
-            return extracted
-
-    try:
-        res = new_decoderv1(google_news_url)
-        if res.get("status") and res.get("decoded_url"):
-            decoded = res["decoded_url"]
-            if decoded.startswith("http") and "news.google.com" not in decoded:
-                return decoded
-    except Exception:
-        pass
-
-    try:
-        headers = {"User-Agent": random.choice(USER_AGENTS)}
-        resp = requests.get(google_news_url, headers=headers, timeout=6)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, "html.parser")
-            canonical = soup.find("link", rel="canonical")
-            if canonical and canonical.get("href") and "google.com" not in canonical["href"]:
-                return canonical["href"]
-            for a in soup.find_all("a", href=True):
-                href = a["href"]
-                if href.startswith("http") and "google.com" not in href:
-                    return href
-    except Exception:
-        pass
-
-    return google_news_url
-
-
-def scrape_article_text(url: str) -> tuple:
-    """Extrai o texto integral diretamente no portal do veículo jornalístico."""
-    real_url = resolve_publisher_url(url)
-    if "news.google.com" in real_url:
-        return None, "FALHA_DECODIFICACAO_URL", real_url
-
-    try:
-        headers = {
-            "User-Agent": random.choice(USER_AGENTS),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7,es;q=0.6",
-        }
-        resp = requests.get(real_url, headers=headers, timeout=12)
-        if resp.status_code != 200:
-            return None, f"FALHA_HTTP_{resp.status_code}", real_url
-
-        html_content = resp.text
-        text = trafilatura.extract(
-            html_content,
-            include_comments=False,
-            include_tables=False,
-            include_links=False,
-            output_format="txt",
-        )
-
-        if not text or len(text.strip()) < 150:
-            soup = BeautifulSoup(html_content, "html.parser")
-            for tag in soup(["script", "style", "nav", "header", "footer", "aside", "form"]):
-                tag.decompose()
-            paragraphs = [p.get_text().strip() for p in soup.find_all("p") if len(p.get_text().strip()) > 35]
-            text = "\n\n".join(paragraphs)
-
-        if text and len(text.strip()) > 150:
-            return text.strip(), "SUCESSO", real_url
-        return None, "CONTEUDO_INSUFICIENTE", real_url
-    except Exception as exc:
-        return None, f"ERRO_EXCEPTION: {str(exc)}", real_url
+def gerar_vetor_1024(titulo: str, texto_completo: str) -> list:
+    """Gera o vetor denso de 1024d sobre Título + Lead Higienizado (até 1200 caracteres)."""
+    embedder = get_embedder()
+    lead = extrair_lead_limpo(texto_completo, max_chars=1200)
+    input_text = f"{titulo}. {lead}".strip() if lead else titulo
+    vetor = embedder.encode(
+        input_text, convert_to_numpy=True, normalize_embeddings=True
+    )
+    return vetor.tolist()
 
 
 def process_cluster_with_fallback(cluster: dict) -> dict:
-    """Executa a tentativa de raspagem do cluster primário e espelhos secundários."""
+    """Processa a extração do cluster e anexa o vetor 1024d."""
     urls_to_try = [cluster["url_primaria"]] + cluster["urls_espelho"]
     historico = []
-    espelhos_decodificados = [resolve_publisher_url(espelho) for espelho in cluster["urls_espelho"]]
+    espelhos_decodificados = [
+        resolve_publisher_url(e) for e in cluster["urls_espelho"]
+    ]
     primeira_url_decodificada = None
 
     for link in urls_to_try:
         texto, status, final_url = scrape_article_text(link)
         if primeira_url_decodificada is None:
             primeira_url_decodificada = final_url
-
         historico.append({
             "url_original_rss": link,
             "url_canonica_decodificada": final_url,
@@ -247,6 +326,7 @@ def process_cluster_with_fallback(cluster: dict) -> dict:
                 "urls_espelho_disponiveis": espelhos_decodificados,
                 "status_extracao": "SUCESSO",
                 "texto_completo": texto,
+                "vetor_1024": gerar_vetor_1024(cluster["titulo"], texto),
                 "motivo_bloqueio": None,
                 "necessita_extracao_manual": False,
                 "historico_tentativas": historico,
@@ -260,27 +340,19 @@ def process_cluster_with_fallback(cluster: dict) -> dict:
         "data_noticia": cluster["data_noticia"],
         "idioma": cluster["idioma"],
         "fonte_utilizada": cluster["fonte_principal"],
-        "url_utilizada": primeira_url_decodificada if primeira_url_decodificada else cluster["url_primaria"],
+        "url_utilizada": (
+            primeira_url_decodificada
+            if primeira_url_decodificada
+            else cluster["url_primaria"]
+        ),
         "urls_espelho_disponiveis": espelhos_decodificados,
         "status_extracao": "BLOQUEADO",
         "texto_completo": "[CONTEUDO_BLOQUEADO]",
-        "motivo_bloqueio": f"Acesso bloqueado ou indisponível em todas as {len(urls_to_try)} fontes testadas.",
+        "vetor_1024": gerar_vetor_1024(cluster["titulo"], ""),
+        "motivo_bloqueio": (
+            f"Acesso bloqueado ou indisponível em todas as {len(urls_to_try)}"
+            " fontes testadas."
+        ),
         "necessita_extracao_manual": True,
         "historico_tentativas": historico,
     }
-
-def criar_sessao_http() -> requests.Session:
-    """Cria uma sessão HTTP com pooling de conexões e retentativas automáticas."""
-    sessao = requests.Session()
-    estrategia_retry = Retry(
-        total=3,
-        backoff_factor=0.5,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET"]
-    )
-    adaptador = HTTPAdapter(max_retries=estrategia_retry, pool_connections=10, pool_maxsize=10)
-    sessao.mount("http://", adaptador)
-    sessao.mount("https://", adaptador)
-    return sessao
-
-SESSAO_GLOBAL = criar_sessao_http()
