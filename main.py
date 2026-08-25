@@ -1,4 +1,4 @@
-"""Orquestrador do ciclo: varredura, clustering, extração e exportação JSON/Excel."""
+"""Orquestrador do ciclo: varredura direcionada, clustering, extração e exportação."""
 
 import concurrent.futures
 from datetime import datetime
@@ -23,23 +23,29 @@ def executar_pipeline() -> None:
         flush=True,
     )
 
-    for tema, termos in config.MONITORAMENTOS.items():
-        for termo in termos:
-            for gl in config.PAISES_EMISSAO:
-                for hl in config.IDIOMAS:
-                    query = processor.build_rss_query(
-                        termo,
-                        config.TERMOS_EXCLUIDOS,
-                        config.PERIODO_BUSCA,
-                        config.DOMINIOS_PREFERENCIAIS,
-                    )
-                    itens = processor.fetch_rss_feed(query, hl=hl, gl=gl)
-                    for item in itens:
-                        item["tema"] = tema
-                        item["termo_origem"] = termo
-                        item["pais_emissao"] = gl
-                        item["idioma"] = hl
-                        raw_articles.append(item)
+    # Varredura direcionada por mercado e idioma nativo
+    for tema, dict_idiomas in config.MONITORAMENTOS.items():
+        print(f">> Tema: {tema}", flush=True)
+        for mercado in config.MERCADOS_ALVO:
+            gl = mercado["gl"]
+            hl = mercado["hl"]
+            lang = mercado["lang"]
+
+            termos = dict_idiomas.get(lang, [])
+            for termo in termos:
+                query = processor.build_rss_query(
+                    termo,
+                    config.TERMOS_EXCLUIDOS,
+                    config.PERIODO_BUSCA,
+                    config.DOMINIOS_PREFERENCIAIS,
+                )
+                itens = processor.fetch_rss_feed(query, hl=hl, gl=gl)
+                for item in itens:
+                    item["tema"] = tema
+                    item["termo_origem"] = termo
+                    item["pais_emissao"] = gl
+                    item["idioma"] = hl
+                    raw_articles.append(item)
 
     print(f"Total bruto coletado: {len(raw_articles)} matérias.", flush=True)
 
@@ -68,11 +74,11 @@ def executar_pipeline() -> None:
                 flush=True,
             )
 
-    # 1. Arquivo JSON estruturado para a Fase 2 (com vetores 1024d)
+    # 1. Arquivo JSON estruturado (com vetores 1024d)
     with open(nome_json, "w", encoding="utf-8") as f:
         json.dump(processed_results, f, ensure_ascii=False, indent=2)
 
-    # 2. Planilha Excel de leitura imediata (sem vetores brutos)
+    # 2. Planilha Excel de leitura imediata
     linhas_excel = []
     for r in processed_results:
         linhas_excel.append({
@@ -99,7 +105,7 @@ def executar_pipeline() -> None:
     )
     bloqueados = len(processed_results) - sucessos
 
-    # 3. Despacho Telegram
+    # 3. Envio duplo no Telegram (JSON + Excel)
     enviar_telegram(
         arquivos=[nome_json, nome_excel],
         total_brutas=len(raw_articles),
