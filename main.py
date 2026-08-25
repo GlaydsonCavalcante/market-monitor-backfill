@@ -447,7 +447,6 @@ import time
 import requests
 
 RAW_LAKE_FILE = "lake_raw_noticias.json"
-CHECKPOINT_FILE = "checkpoint_processamento.json"
 FINAL_OUTPUT_JSON = (
     f"noticias_processadas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 )
@@ -511,6 +510,21 @@ def enviar_telegram(
             print(f"Relatório e anexo entregues para: {chat_id}")
 
 
+# ==========================================
+# 3. EXTRAÇÃO MULTITHREAD E PERSISTÊNCIA
+# ==========================================
+CHECKPOINT_FILE = "checkpoint_processamento.json"
+checkpoint_data = {}
+
+if os.path.exists(CHECKPOINT_FILE):
+    with open(CHECKPOINT_FILE, "r", encoding="utf-8") as f:
+        checkpoint_data = json.load(f)
+
+clusters_pendentes = [
+    c for c in clusters if c["id_cluster"] not in checkpoint_data
+]
+
+
 def worker_extracao(cluster_item):
     time.sleep(random.uniform(0.4, 1.0))
     return process_cluster_with_fallback(cluster_item)
@@ -524,14 +538,22 @@ with concurrent.futures.ThreadPoolExecutor(
     }
 
     for i, futuro in enumerate(concurrent.futures.as_completed(futuros), 1):
-        resultado = futuro.result()
-        checkpoint_data[resultado["id_cluster"]] = resultado
-        if i % 10 == 0 or i == len(clusters_pendentes):
-            with open(CHECKPOINT_FILE, "w", encoding="utf-8") as f:
-                json.dump(checkpoint_data, f, ensure_ascii=False, indent=2)
+        try:
+            resultado = futuro.result()
+            c_id = resultado["id_cluster"]
+            checkpoint_data[c_id] = resultado
 
-# 4. Geração do JSON Final e Despacho
+            if i % 10 == 0 or i == len(clusters_pendentes):
+                with open(CHECKPOINT_FILE, "w", encoding="utf-8") as f:
+                    json.dump(checkpoint_data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+# ==========================================
+# 4. GERAÇÃO DO JSON FINAL E DESPACHO
+# ==========================================
 processed_results = list(checkpoint_data.values())
+
 with open(FINAL_OUTPUT_JSON, "w", encoding="utf-8") as f:
     json.dump(processed_results, f, ensure_ascii=False, indent=2)
 
