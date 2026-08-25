@@ -23,28 +23,32 @@ def executar_pipeline() -> None:
         flush=True,
     )
 
-    for tema, dict_idiomas in config.MONITORAMENTOS.items():
-        print(f">> Tema: {tema}", flush=True)
-        for mercado in config.MERCADOS_ALVO:
-            gl = mercado["gl"]
-            hl = mercado["hl"]
-            lang = mercado["lang"]
+    # Trecho da coleta no main.py
+for tema, dict_idiomas in config.MONITORAMENTOS.items():
+  print(f">> Tema: {tema}", flush=True)
+  for mercado in config.MERCADOS_ALVO:
+    gl = mercado["gl"]
+    hl = mercado["hl"]
+    lang = mercado["lang"]
 
-            termos = dict_idiomas.get(lang, [])
-            for termo in termos:
-                query = processor.build_rss_query(
-                    termo,
-                    config.TERMOS_EXCLUIDOS,
-                    config.PERIODO_BUSCA,
-                    config.DOMINIOS_PREFERENCIAIS,
-                )
-                itens = processor.fetch_rss_feed(query, hl=hl, gl=gl)
-                for item in itens:
-                    item["tema"] = tema
-                    item["termo_origem"] = termo
-                    item["pais_emissao"] = gl
-                    item["idioma"] = hl
-                    raw_articles.append(item)
+    termos = dict_idiomas.get(lang, [])
+    # Recupera a lista de termos excluídos para a língua atual
+    termos_excluidos_idioma = config.TERMOS_EXCLUIDOS.get(lang, [])
+
+    for termo in termos:
+      query = processor.build_rss_query(
+          base_term=termo,
+          excluded_terms=termos_excluidos_idioma,
+          period=config.PERIODO_BUSCA,
+          preferred_domains=config.DOMINIOS_PREFERENCIAIS,
+      )
+      itens = processor.fetch_rss_feed(query, hl=hl, gl=gl)
+      for item in itens:
+        item["tema"] = tema
+        item["termo_origem"] = termo
+        item["pais_emissao"] = gl
+        item["idioma"] = hl
+        raw_articles.append(item)
 
     print(f"Total bruto coletado: {len(raw_articles)} matérias.", flush=True)
 
