@@ -511,60 +511,118 @@ def enviar_telegram(
 
 
 # ==========================================
-# 3. EXTRAÇÃO MULTITHREAD E PERSISTÊNCIA
+# EXECUÇÃO PRINCIPAL (FLUXO COMPLETO)
 # ==========================================
-CHECKPOINT_FILE = "checkpoint_processamento.json"
-checkpoint_data = {}
+if __name__ == "__main__":
+    RAW_LAKE_FILE = "lake_raw_noticias.json"
+    CHECKPOINT_FILE = "checkpoint_processamento.json"
+    FINAL_OUTPUT_JSON = (
+        f"noticias_processadas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    )
 
-if os.path.exists(CHECKPOINT_FILE):
-    with open(CHECKPOINT_FILE, "r", encoding="utf-8") as f:
-        checkpoint_data = json.load(f)
+    # 1. Coleta RSS
+    raw_articles = []
+    if os.path.exists(RAW_LAKE_FILE):
+        print(f"Carregando registros brutos de '{RAW_LAKE_FILE}'...")
+        with open(RAW_LAKE_FILE, "r", encoding="utf-8") as f:
+            raw_articles = json.load(f)
+    else:
+        print(
+            f"Iniciando varredura RSS em {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}..."
+        )
+        for tema, termos in MONITORAMENTOS.items():
+            print(f">> Tema: {tema}")
+            for termo in termos:
+                for gl in PAISES_EMISSAO:
+                    for hl in IDIOMAS:
+                        q = build_rss_query(
+                            termo,
+                            TERMOS_EXCLUIDOS,
+                            PERIODO_BUSCA,
+                            DOMINIOS_PREFERENCIAIS,
+                        )
+                        itens = fetch_rss_feed(q, hl=hl, gl=gl)
+                        for item in itens:
+                            item["tema"] = tema
+                            item["termo_origem"] = termo
+                            item["pais_emissao"] = gl
+                            item["idioma"] = hl
+                            raw_articles.append(item)
 
-clusters_pendentes = [
-    c for c in clusters if c["id_cluster"] not in checkpoint_data
-]
+        with open(RAW_LAKE_FILE, "w", encoding="utf-8") as f:
+            json.dump(raw_articles, f, ensure_ascii=False, indent=2)
+        print(f"Coleta concluída: {len(raw_articles)} matérias no lake.")
 
+    # 2. Deduplicação Semântica (Criação da variável 'clusters')
+    clusters = cluster_articles(
+        raw_articles,
+        similarity_threshold=globals().get("SIMILARIDADE_REDUNDANCIA", 0.88),
+    )
+    print(
+        f"Deduplicação concluída: {len(raw_articles)} matérias agrupadas em {len(clusters)} clusters.\n"
+    )
 
-def worker_extracao(cluster_item):
-    time.sleep(random.uniform(0.4, 1.0))
-    return process_cluster_with_fallback(cluster_item)
+    # 3. Extração Multithread com Persistência
+    checkpoint_data = {}
+    if os.path.exists(CHECKPOINT_FILE):
+        with open(CHECKPOINT_FILE, "r", encoding="utf-8") as f:
+            checkpoint_data = json.load(f)
 
+    clusters_pendentes = [
+        c for c in clusters if c["id_cluster"] not in checkpoint_data
+    ]
+    print(
+        f"Iniciando extração ({len(clusters_pendentes)} pendentes de {len(clusters)} totais)..."
+    )
 
-with concurrent.futures.ThreadPoolExecutor(
-    max_workers=MAX_WORKERS_PARALELO
-) as executor:
-    futuros = {
-        executor.submit(worker_extracao, c): c for c in clusters_pendentes
-    }
+    def worker_extracao(cluster_item):
+        time.sleep(random.uniform(0.4, 1.0))
+        return process_cluster_with_fallback(cluster_item)
 
-    for i, futuro in enumerate(concurrent.futures.as_completed(futuros), 1):
-        try:
-            resultado = futuro.result()
-            c_id = resultado["id_cluster"]
-            checkpoint_data[c_id] = resultado
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=MAX_WORKERS_PARALELO
+    ) as executor:
+        futuros = {
+            executor.submit(worker_extracao, c): c for c in clusters_pendentes
+        }
 
-            if i % 10 == 0 or i == len(clusters_pendentes):
-                with open(CHECKPOINT_FILE, "w", encoding="utf-8") as f:
-                    json.dump(checkpoint_data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        for i, futuro in enumerate(concurrent.futures.as_completed(futuros), 1):
+            try:
+                resultado = futuro.result()
+                c_id = resultado["id_cluster"]
+                checkpoint_data[c_id] = resultado
 
-# ==========================================
-# 4. GERAÇÃO DO JSON FINAL E DESPACHO
-# ==========================================
-processed_results = list(checkpoint_data.values())
+                status_icon = (
+                    "✅" if resultado["status_extracao"] == "SUCESSO" else "🔒"
+                )
+                print(
+                    f"[{i}/{len(clusters_pendentes)}] {status_icon} {resultado['titulo'][:60]}..."
+                )
 
-with open(FINAL_OUTPUT_JSON, "w", encoding="utf-8") as f:
-    json.dump(processed_results, f, ensure_ascii=False, indent=2)
+                if i % 10 == 0 or i == len(clusters_pendentes):
+                    with open(CHECKPOINT_FILE, "w", encoding="utf-8") as f:
+                        json.dump(
+                            checkpoint_data, f, ensure_ascii=False, indent=2
+                        )
+            except Exception:
+                pass
 
-sucessos = sum(1 for r in processed_results if r["status_extracao"] == "SUCESSO")
-bloqueados = len(processed_results) - sucessos
+    # 4. Consolidação e Envio do Relatório
+    processed_results = list(checkpoint_data.values())
 
-enviar_telegram(
-    caminho_arquivo=FINAL_OUTPUT_JSON,
-    total_brutas=len(raw_articles),
-    total_clusters=len(clusters),
-    total_processadas=len(processed_results),
-    sucessos=sucessos,
-    bloqueados=bloqueados,
-)
+    with open(FINAL_OUTPUT_JSON, "w", encoding="utf-8") as f:
+        json.dump(processed_results, f, ensure_ascii=False, indent=2)
+
+    sucessos = sum(
+        1 for r in processed_results if r["status_extracao"] == "SUCESSO"
+    )
+    bloqueados = len(processed_results) - sucessos
+
+    enviar_telegram(
+        caminho_arquivo=FINAL_OUTPUT_JSON,
+        total_brutas=len(raw_articles),
+        total_clusters=len(clusters),
+        total_processadas=len(processed_results),
+        sucessos=sucessos,
+        bloqueados=bloqueados,
+    )
