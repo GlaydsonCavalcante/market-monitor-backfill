@@ -1,4 +1,4 @@
-"""Orquestrador do ciclo: varredura direcionada, clustering, extração e exportação."""
+"""Orquestrador do ciclo: varredura, extração concorrente, vetorização em lote e exportação."""
 
 import concurrent.futures
 from datetime import datetime
@@ -23,7 +23,6 @@ def executar_pipeline() -> None:
         flush=True,
     )
 
-    # Varredura direcionada por mercado e idioma nativo
     for tema, dict_idiomas in config.MONITORAMENTOS.items():
         print(f">> Tema: {tema}", flush=True)
         for mercado in config.MERCADOS_ALVO:
@@ -54,13 +53,15 @@ def executar_pipeline() -> None:
         similarity_threshold=config.SIMILARIDADE_REDUNDANCIA,
     )
 
+    # 1. Extração concorrente pura de I/O de rede (8 workers)
     def worker(cluster_item):
-        time.sleep(random.uniform(0.4, 1.0))
+        time.sleep(random.uniform(0.1, 0.4))
         return processor.process_cluster_with_fallback(cluster_item)
 
     processed_results = []
+    max_workers = 8  # Aumentado para acelerar download
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=config.MAX_WORKERS_PARALELO
+        max_workers=max_workers
     ) as executor:
         futuros = {executor.submit(worker, c): c for c in clusters}
         for i, futuro in enumerate(concurrent.futures.as_completed(futuros), 1):
@@ -74,11 +75,13 @@ def executar_pipeline() -> None:
                 flush=True,
             )
 
-    # 1. Arquivo JSON estruturado (com vetores 1024d)
+    # 2. Vetorização de alta performance em lote (executa em ~15 a 20 segundos)
+    processor.gerar_vetores_em_lote(processed_results)
+
+    # 3. Exportação dos arquivos JSON e Excel
     with open(nome_json, "w", encoding="utf-8") as f:
         json.dump(processed_results, f, ensure_ascii=False, indent=2)
 
-    # 2. Planilha Excel de leitura imediata
     linhas_excel = []
     for r in processed_results:
         linhas_excel.append({
@@ -105,7 +108,7 @@ def executar_pipeline() -> None:
     )
     bloqueados = len(processed_results) - sucessos
 
-    # 3. Envio duplo no Telegram (JSON + Excel)
+    # 4. Despacho no Telegram
     enviar_telegram(
         arquivos=[nome_json, nome_excel],
         total_brutas=len(raw_articles),
