@@ -535,16 +535,14 @@ processed_results = list(checkpoint_data.values())
 with open(FINAL_OUTPUT_JSON, "w", encoding="utf-8") as f:
     json.dump(processed_results, f, ensure_ascii=False, indent=2)
 
-sucessos = sum(
-      1 for r in processed_results if r["status_extracao"] == "SUCESSO"
-  )
-  bloqueados = len(processed_results) - sucessos
+sucessos = sum(1 for r in processed_results if r["status_extracao"] == "SUCESSO")
+bloqueados = len(processed_results) - sucessos
 
-  enviar_telegram(
-      caminho_arquivo=FINAL_OUTPUT_JSON,
-      total_brutas=len(raw_articles),
-      total_clusters=len(clusters),
-      total_processadas=len(processed_results),
-      sucessos=sucessos,
-      bloqueados=bloqueados,
-  )
+enviar_telegram(
+    caminho_arquivo=FINAL_OUTPUT_JSON,
+    total_brutas=len(raw_articles),
+    total_clusters=len(clusters),
+    total_processadas=len(processed_results),
+    sucessos=sucessos,
+    bloqueados=bloqueados,
+)
