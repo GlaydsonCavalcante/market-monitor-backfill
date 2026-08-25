@@ -1,19 +1,29 @@
-name: Pipeline de Monitoramento de Mercado
+name: Monitoramento de Mercado Multirregional
 
 on:
   schedule:
-    # Execução diária às 10:00 UTC (07:00 Horário de Brasília)
-    - cron: '0 10 * * *'
-  workflow_dispatch: # Permite disparo manual
+    # Executa todos os dias às 06:00 UTC (03:00 Horário de Brasília)
+    - cron: '0 6 * * *'
+  workflow_dispatch:
 
 jobs:
-  executar-monitoramento:
+  executar-shard:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [latam, anglo, europa, asia]
 
     steps:
       - name: Baixar codigo do repositorio
         uses: actions/checkout@v4
+
+      - name: Liberar espaco em disco no Runner
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
 
       - name: Configurar ambiente Python
         uses: actions/setup-python@v5
@@ -21,33 +31,36 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Cache do Modelo de IA
+      - name: Cache do Modelo BGE-M3
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
           key: ${{ runner.os }}-hf-bge-m3
-          
-      - name: Instalar bibliotecas
+
+      - name: Instalar dependencias (PyTorch CPU)
         run: pip install -r requirements.txt
 
-      - name: Executar rotina de extracao
+      - name: Executar Pipeline do Shard [${{ matrix.shard }}]
         env:
           PYTHONUNBUFFERED: "1"
+          SHARD_NAME: ${{ matrix.shard }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "405898240,5401165820"
-        run: python main.py
+        run: python main.py --config configs/config_${{ matrix.shard }}.py
 
       - name: Notificar falha via Telegram
         if: failure()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "405898240,5401165820"
+          SHARD_NAME: ${{ matrix.shard }}
         run: |
           python -c '
           import os, requests
           token = os.getenv("TELEGRAM_BOT_TOKEN")
+          shard = os.getenv("SHARD_NAME")
           ids = [i.strip() for i in os.getenv("TELEGRAM_CHAT_ID", "").split(",") if i.strip()]
-          msg = "🚨 <b>FALHA NO MONITORAMENTO DE MERCADO</b>\n\nA rotina diária encontrou um erro crítico e não pôde ser concluída. Verifique os logs de execução no GitHub Actions."
+          msg = f"🚨 <b>FALHA NO SHARD {shard.upper()}</b>\nA rotina encontrou um erro crítico. Verifique os logs no GitHub Actions."
           for chat_id in ids:
               try:
                   requests.post(
