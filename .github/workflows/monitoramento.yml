@@ -2,14 +2,14 @@ name: Pipeline de Monitoramento de Mercado
 
 on:
   schedule:
-    # Execução diária às 03:00 UTC (03:00 Horário de Brasília)
+    # Execução diária às 06:00 UTC (03:00 Horário de Brasília)
     - cron: '0 6 * * *'
-  workflow_dispatch: # Permite disparo manual pelo painel de controle
+  workflow_dispatch: # Permite disparo manual
 
 jobs:
   executar-monitoramento:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
 
     steps:
       - name: Baixar codigo do repositorio
@@ -30,3 +30,25 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "405898240,5401165820"
         run: python main.py
+
+      - name: Notificar falha via Telegram
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "405898240,5401165820"
+        run: |
+          python -c '
+          import os, requests
+          token = os.getenv("TELEGRAM_BOT_TOKEN")
+          ids = [i.strip() for i in os.getenv("TELEGRAM_CHAT_ID", "").split(",") if i.strip()]
+          msg = "🚨 <b>FALHA NO MONITORAMENTO DE MERCADO</b>\n\nA rotina diária encontrou um erro crítico e não pôde ser concluída. Verifique os logs de execução no GitHub Actions."
+          for chat_id in ids:
+              try:
+                  requests.post(
+                      f"https://api.telegram.org/bot{token}/sendMessage",
+                      data={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"},
+                      timeout=30
+                  )
+              except Exception:
+                  pass
+          '
