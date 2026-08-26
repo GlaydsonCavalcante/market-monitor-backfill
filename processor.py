@@ -12,6 +12,8 @@ import numpy as np
 import requests
 from sentence_transformers import SentenceTransformer
 import trafilatura
+import math
+import time
 
 USER_AGENTS = [
     (
@@ -159,9 +161,7 @@ def resolve_publisher_url(google_news_url: str) -> str:
   return google_news_url
 
 
-def scrape_article_text(
-    url: str, timeout: int = 6
-) -> tuple:
+def scrape_article_text(url: str, timeout: int = 5) -> tuple:
   real_url = resolve_publisher_url(url)
   if "news.google.com" in real_url:
     return None, "FALHA_DECODIFICACAO_URL", real_url
@@ -173,7 +173,8 @@ def scrape_article_text(
         ),
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7,es;q=0.6",
     }
-    resp = requests.get(real_url, headers=headers, timeout=timeout)
+    # Timeout dividido: 3s para conectar ao servidor, 5s para baixar o HTML
+    resp = requests.get(real_url, headers=headers, timeout=(3, 5))
     if resp.status_code != 200:
       return None, f"FALHA_HTTP_{resp.status_code}", real_url
     html_content = resp.text
@@ -202,7 +203,6 @@ def scrape_article_text(
     return None, "CONTEUDO_INSUFICIENTE", real_url
   except Exception as exc:
     return None, f"ERRO_EXCEPTION: {str(exc)}", real_url
-
 
 def cluster_articles(
     raw_articles: list,
@@ -328,9 +328,13 @@ def gerar_vetores_em_lote(
     processed_results: list,
     termos_descarte_dict: dict,
     model_name: str = "BAAI/bge-m3",
+    batch_size: int = 32,
 ) -> None:
-  if not processed_results:
+  """Calcula embeddings BGE-M3 com log de progresso em tempo real no console."""
+  total_itens = len(processed_results)
+  if total_itens == 0:
     return
+
   embedder = get_embedder(model_name)
   textos_para_vetorizar = []
 
@@ -346,18 +350,49 @@ def gerar_vetores_em_lote(
     trecho_final = f"{r['titulo']}. {lead}".strip() if lead else r["titulo"]
     textos_para_vetorizar.append(trecho_final)
 
+  total_lotes = math.ceil(total_itens / batch_size)
   print(
-      f"Vetorizando {len(textos_para_vetorizar)} itens em lote com {model_name}...",
+      f"\nIniciando vetorização de {total_itens} matérias com {model_name}...",
       flush=True,
   )
-  vetores = embedder.encode(
-      textos_para_vetorizar,
-      batch_size=32,
-      show_progress_bar=False,
-      convert_to_numpy=True,
-      normalize_embeddings=True,
+  print(
+      f"Configuração: {total_lotes} lotes de até {batch_size} itens.",
+      flush=True,
   )
 
+  vetores_finais = []
+  inicio_vetorizacao = time.time()
+
+  for idx in range(0, total_itens, batch_size):
+    lote_atual_num = (idx // batch_size) + 1
+    lote_textos = textos_para_vetorizar[idx : idx + batch_size]
+
+    t0 = time.time()
+    vetores_lote = embedder.encode(
+        lote_textos,
+        batch_size=batch_size,
+        show_progress_bar=False,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
+    tempo_lote = time.time() - t0
+
+    vetores_finais.extend(vetores_lote.tolist())
+
+    itens_processados = min(idx + batch_size, total_itens)
+    pct = (itens_processados / total_itens) * 100
+    print(
+        f"  >> [Lote {lote_atual_num:02d}/{total_lotes:02d}]"
+        f" {itens_processados}/{total_itens} ({pct:.1f}%) vetorizados em"
+        f" {tempo_lote:.2f}s",
+        flush=True,
+    )
+
   for i, r in enumerate(processed_results):
-    r["vetor_1024"] = vetores[i].tolist()
-  print("Vetorização em lote concluída com sucesso.", flush=True)
+    r["vetor_1024"] = vetores_finais[i]
+
+  tempo_total = time.time() - inicio_vetorizacao
+  print(
+      f"Vetorização finalizada com sucesso! Tempo total: {tempo_total:.2f}s\n",
+      flush=True,
+  )
