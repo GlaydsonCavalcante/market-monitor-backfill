@@ -9,11 +9,11 @@ on:
 jobs:
   executar-shard:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [latam, anglo, europa, asia, mea]
+        shard: [latam, anglo, europa, asia_jp_kr, asia_china_sg, mea]
 
     steps:
       - name: Baixar codigo do repositorio
@@ -24,7 +24,6 @@ jobs:
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
-          df -h
 
       - name: Configurar ambiente Python
         uses: actions/setup-python@v5
