@@ -7,12 +7,12 @@ import importlib.util
 import json
 import os
 import random
+import re
 import sys
 import time
 from notifier import enviar_telegram
 import pandas as pd
 import processor
-
 
 def carregar_modulo_config(caminho_config: str):
   """Carrega dinamicamente o arquivo de configuração passado por argumento."""
@@ -33,7 +33,7 @@ def executar_pipeline(caminho_config: str) -> None:
   ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
   nome_json = f"noticias_{regiao}_{ts}.json"
-  nome_excel = f"noticias_{regiao}_{ts}.xlsx"
+  # nome_excel = f"noticias_{regiao}_{ts}.xlsx"
 
   raw_articles = []
   print(
@@ -109,28 +109,35 @@ def executar_pipeline(caminho_config: str) -> None:
       model_name=cfg.MODELO_EMBEDDING_1024,
   )
 
-  # 5. Exportação JSON e Excel
+  # 5. Exporta o JSON com vetor_1024 compactado em linha única
+  json_formatado = json.dumps(processed_results, ensure_ascii=False, indent=2)
+  json_compactado = re.sub(
+      r'("vetor_1024":\s*\[)([\s\d.,eE+-]+)(\])',
+      lambda m: m.group(1) + " ".join(m.group(2).split()) + m.group(3),
+      json_formatado,
+  )
+  
   with open(nome_json, "w", encoding="utf-8") as f:
-    json.dump(processed_results, f, ensure_ascii=False, indent=2)
+      f.write(json_compactado)
 
-  linhas_excel = []
-  for r in processed_results:
-    linhas_excel.append({
-        "ID_Cluster": r.get("id_cluster"),
-        "Tema": r.get("tema"),
-        "Título": r.get("titulo"),
-        "Fonte": r.get("fonte_utilizada"),
-        "Data_Notícia": r.get("data_noticia"),
-        "Idioma": r.get("idioma"),
-        "URL_Canônica": r.get("url_utilizada"),
-        "Status_Extração": r.get("status_extracao"),
-        "Texto_Completo": (
-            r.get("texto_completo")[:3000] if r.get("texto_completo") else ""
-        ),
-        "URLs_Espelho": ", ".join(r.get("urls_espelho_disponiveis", [])),
-    })
-  df_excel = pd.DataFrame(linhas_excel)
-  df_excel.to_excel(nome_excel, index=False, engine="openpyxl")
+  # linhas_excel = []
+  # for r in processed_results:
+  #   linhas_excel.append({
+  #       "ID_Cluster": r.get("id_cluster"),
+  #       "Tema": r.get("tema"),
+  #       "Título": r.get("titulo"),
+  #       "Fonte": r.get("fonte_utilizada"),
+  #       "Data_Notícia": r.get("data_noticia"),
+  #       "Idioma": r.get("idioma"),
+  #       "URL_Canônica": r.get("url_utilizada"),
+  #       "Status_Extração": r.get("status_extracao"),
+  #       "Texto_Completo": (
+  #           r.get("texto_completo")[:3000] if r.get("texto_completo") else ""
+  #       ),
+  #       "URLs_Espelho": ", ".join(r.get("urls_espelho_disponiveis", [])),
+  #   })
+  # df_excel = pd.DataFrame(linhas_excel)
+  # df_excel.to_excel(nome_excel, index=False, engine="openpyxl")
 
   sucessos = sum(
       1 for r in processed_results if r["status_extracao"] == "SUCESSO"
@@ -140,7 +147,7 @@ def executar_pipeline(caminho_config: str) -> None:
   # 6. Despacho Telegram
   enviar_telegram(
       regiao_nome=regiao,
-      arquivos=[nome_json, nome_excel],
+      # arquivos=[nome_json, nome_excel],
       total_brutas=len(raw_articles),
       total_clusters=len(clusters),
       total_processadas=len(processed_results),
