@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [latam, anglo, europa, asia_jp_kr, asia_china_sg, mea]
+        shard: [latam, anglo, europa, asia_jp, asia_kr, asia_china_sg, mea]
 
     steps:
       - name: Baixar codigo do repositorio
