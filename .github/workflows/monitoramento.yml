@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
-      fail-fast: false
+      fail-fast: false # Garante que a falha de um shard NÃO cancela os demais
       matrix:
         shard: [latam, anglo, europa, asia_jp, asia_kr, asia_china_sg, mea]
 
@@ -60,7 +60,7 @@ jobs:
           token = os.getenv("TELEGRAM_BOT_TOKEN")
           shard = os.getenv("SHARD_NAME")
           ids = [i.strip() for i in os.getenv("TELEGRAM_CHAT_ID", "").split(",") if i.strip()]
-          msg = f"🚨 <b>FALHA NO SHARD {shard.upper()}</b>\nA rotina encontrou um erro crítico. Verifique os logs no GitHub Actions."
+          msg = f"🚨 <b>FALHA NO SHARD {shard.upper()}</b>\nA rotina encontrou um erro crítico. Os demais shards continuam em execução."
           for chat_id in ids:
               try:
                   requests.post(
