@@ -38,7 +38,7 @@ def enviar_telegram(
       f"🧩 <b>Clusters Únicos:</b> {total_clusters}\n"
       f"⚡ <b>Textos Extraídos:</b> {sucessos} ({taxa_sucesso:.1f}%)\n"
       f"🔒 <b>Bloqueadas / Manuais:</b> {bloqueados}\n\n"
-      "📎 <i>Anexos: JSON (ingestão Fase 2) e Excel (leitura imediata).</i>"
+      "📎 <i>Anexos: JSON (ingestão Fase 2).</i>"
   )
 
   for chat_id in chat_ids:
