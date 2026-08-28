@@ -113,6 +113,87 @@ MONITORAMENTOS = {
             '("Revolut Research" OR ("Revolut" AND ("आर्टिफिशियल इंटेलिजेंस" OR PRAGMA OR क्रिप्टो OR EURR OR अनुपालन OR धोखाधड़ी)))',
         ],
     },
+    "Caixa Economica Federal": {
+        "ar": [
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem" OR "Caixa Habitação") ("التمويل العقاري" OR "القروض السكنية" OR "Minha Casa Minha Vida" OR SFH OR SBPE OR LCI OR التوريق العقاري)',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("البرامج الاجتماعية" OR "الشمول المالي" OR "الحكومة الرقمية" OR "الذكاء الاصطناعي التوليدي" OR Pix OR "الخدمات المصرفية المفتوحة")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Empresas" OR "Caixa Asset") ("الائتمان الريفي" OR Pronaf OR الكفاءة OR الربحية OR "التحول التشغيلي")',
+        ],
+        "en": [
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem" OR "Caixa Habitação") ("mortgage lending" OR "housing credit" OR "Minha Casa Minha Vida" OR SFH OR SBPE OR LCI OR securitization)',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("social programs" OR "financial inclusion" OR "digital government" OR "generative AI" OR Pix OR "Open Finance")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Empresas" OR "Caixa Asset") ("rural credit" OR Pronaf OR efficiency OR profitability OR "operational transformation")',
+        ],
+        "hi": [
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem" OR "Caixa Habitação") ("आवास ऋण" OR "रियल एस्टेट फंडिंग" OR "Minha Casa Minha Vida" OR SFH OR SBPE OR LCI OR प्रतिभूतिकरण)',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("सामाजिक कार्यक्रम" OR "वित्तीय समावेशन" OR "डिजिटल सरकार" OR "जेनेरेटिव AI" OR Pix OR "ओपन फाइनेंस")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Empresas") ("ग्रामीण ऋण" OR Pronaf OR दक्षता OR लाभप्रदता OR "परिचालन परिवर्तन")',
+        ],
+    },
+    "Itau": {
+        "ar": [
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itau Unibanco" OR "Itaú BBA" OR "iti") ("الذكاء الاصطناعي التوليدي" OR "وكلاء الذكاء الاصطناعي" OR "المصرفية التحادثية" OR "المساعد المالي" OR "الذكاء الاصطناعي للاستثمار" OR IAI)',
+            '("Itaú" OR "Itau" OR "Itaú Private" OR "Itaú Asset" OR "Itaú Personnalité") ("إدارة الثروات" OR الاستشارات OR Vanguard OR "التوزيع العالمي للأصول" OR أصحاب الثروات)',
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Rede") ("التمويل المضمن" OR "الخدمات المصرفية كخدمة" OR BaaS OR APIs OR "التمويل المفتوح" OR "التمويل الأخضر" OR ESG)',
+        ],
+        "en": [
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itau Unibanco" OR "Itaú BBA" OR "iti") ("generative AI" OR "AI agents" OR "conversational banking" OR "financial copilots" OR "AI investing" OR IAI)',
+            '("Itaú" OR "Itau" OR "Itaú Private" OR "Itaú Asset") ("wealth management" OR Vanguard OR "global allocation" OR "embedded finance" OR BaaS OR "Open Finance" OR "green finance" OR ESG)',
+        ],
+        "hi": [
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itaú BBA" OR "iti") ("जेनेरेटिव AI" OR "AI एजेंट्स" OR "कन्वर्सेशनल बैंकिंग" OR "फाइनेंशियल कोपायलट" OR "AI निवेश" OR IAI)',
+            '("Itaú" OR "Itau" OR "Itaú Private" OR "Itaú Asset") ("वेल्थ मैनेजमेंट" OR Vanguard OR "ग्लोबल एलोकेशन" OR "एम्बेडेड फाइनेंस" OR BaaS OR "ओपन फाइनेंस" OR ESG)',
+        ],
+    },
+    "Bradesco": {
+        "ar": [
+            '("Bradesco" OR "Banco Bradesco" OR "Next" OR "Ágora") (BIA OR "BIA GenAI" OR "المصرفية التحادثية" OR "المساعد المالي" OR "AI-first banking" OR "BIA Tech")',
+            '("Bradesco" OR "Banco Bradesco" OR "Bradesco Seguros") (إغلاق الفروع OR خفض التكاليف OR الإنتاجية OR "Meu Bradesco" OR "التمويل المفتوح" OR "التأمين المناخي")',
+            '("Bradesco" OR "Bradesco Asset" OR "BBI" OR "Inovabra") ("الأصول الرقمية" OR ترميز الأصول OR "الحفظ الرقمي" OR العملات المشفرة OR "إنتاجية المطورين")',
+        ],
+        "en": [
+            '("Bradesco" OR "Banco Bradesco" OR "Next" OR "Ágora") (BIA OR "BIA GenAI" OR "conversational banking" OR "financial assistant" OR "AI-first banking" OR "BIA Tech")',
+            '("Bradesco" OR "Banco Bradesco" OR "Bradesco Seguros") ("branch closures" OR "cost reduction" OR "Meu Bradesco" OR "Open Finance" OR "climate insurance" OR "digital assets" OR tokenization)',
+        ],
+        "hi": [
+            '("Bradesco" OR "Banco Bradesco" OR "Next" OR "Ágora") (BIA OR "BIA GenAI" OR "कन्वर्सेशनल बैंकिंग" OR "AI-first बैंकिंग" OR "BIA Tech")',
+            '("Bradesco" OR "Banco Bradesco" OR "Bradesco Seguros") (शाखा बंद होना OR लागत में कमी OR "Meu Bradesco" OR "ओपन फाइनेंस" OR "जलवायु बीमा" OR "डिजिटल एसेट्स" OR टोकनाइजेशन)',
+        ],
+    },
+    "Bank of America": {
+        "ar": [
+            '("Bank of America" OR "BofA" OR "Merrill Lynch" OR "Merrill") ("المصرفية الرقمية" OR "Agentic banking" OR "وكلاء الذكاء الاصطناعي" OR "التمويل المستقل" OR "المساعد المالي")',
+            '("BofA Institute" OR "BofA Global Research" OR ("Bank of America" AND ("اتجاهات المستهلك" OR "اقتصاد الجيل Z" OR "مستقبل الخدمات المصرفية")))',
+            '("Bank of America" OR "BofA" OR "BofA Securities") ("المدفوعات في الوقت الفعلي" OR RTP OR "المدفوعات عبر الحدود" OR "التمويل المضمن" OR "إدارة الثروات" OR ترميز الأصول OR "الائتمان الخاص" OR "Jio Financial" OR "Jio Credit")',
+        ],
+        "en": [
+            '("Bank of America" OR "BofA" OR "Merrill Lynch" OR "Merrill") ("digital banking" OR "agentic banking" OR "agentic AI" OR "AI agents" OR "autonomous finance" OR "financial copilots")',
+            '("BofA Institute" OR "BofA Global Research" OR ("Bank of America" AND ("consumer trends" OR "Gen Z economy" OR "future of banking" OR "US consumer")))',
+            '("Bank of America" OR "BofA" OR "BofA Securities") ("real-time payments" OR RTP OR "cross-border payments" OR "embedded finance" OR "wealth management" OR tokenization OR "private credit" OR "Jio Financial" OR "Jio Credit" OR "India growth")',
+        ],
+        "hi": [
+            '("Bank of America" OR "BofA" OR "Merrill Lynch" OR "Merrill") ("डिजिटल बैंकिंग" OR "एजेंटिक बैंकिंग" OR "Agentic AI" OR "AI एजेंट्स" OR "ऑटोनॉमस फाइनेंस" OR "फाइनेंशियल कोपायलट")',
+            '("BofA Institute" OR "BofA Global Research" OR ("Bank of America" AND ("उपभोक्ता रुझान" OR "Gen Z अर्थव्यवस्था" OR "बैंकिंग का भविष्य")))',
+            '("Bank of America" OR "BofA" OR "BofA Securities") ("रियल-टाइम पेमेंट्स" OR RTP OR "सीमा पार भुगतान" OR "एम्बेडेड फाइनेंस" OR "वेल्थ मैनेजमेंट" OR टोकनाइजेशन OR "प्राइवेट क्रेडिट" OR "Jio Financial" OR "Jio Credit" OR "India growth")',
+        ],
+    },
+    "JPMorgan": {
+        "ar": [
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase" OR "Onyx" OR "Kinexys") (ترميز الأصول OR "الودائع المرمزة" OR "الأصول الرقمية" OR "التسوية عبر البلوكشين" OR "البلوكشين المؤسسي" OR "DeFi المنظم" OR العقود الذكية)',
+            '("JPMorgan" OR "JPMorgan Chase" OR "JP Morgan Payments") ("البنية التحتية المالية" OR "مدفوعات الجملة" OR "المدفوعات القابلة للبرمجة" OR "الخزينة في الوقت الفعلي" OR "المدفوعات عبر الحدود")',
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase") ("الذكاء الاصطناعي في المصارف" OR "الذكاء الاصطناعي التوليدي" OR "Agentic AI" OR "التمويل المضمن" OR "API banking" OR BaaS OR "الائتمان الخاص" OR "الاستثمار المؤسسي")',
+        ],
+        "en": [
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase" OR "Onyx" OR "Kinexys") (tokenization OR "tokenized deposits" OR "digital assets" OR "blockchain settlement" OR "institutional blockchain" OR "regulated DeFi" OR "smart contracts")',
+            '("JPMorgan" OR "JPMorgan Chase" OR "JP Morgan Payments") ("financial infrastructure" OR "wholesale payments" OR "programmable payments" OR "real-time treasury" OR "cross-border payments" OR "corporate payments")',
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase") ("AI banking" OR "generative AI" OR "agentic AI" OR "AI in markets" OR "embedded finance" OR "API banking" OR BaaS OR "private credit" OR "institutional investing")',
+        ],
+        "hi": [
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase" OR "Onyx" OR "Kinexys") (टोकनाइजेशन OR "टोकनाइज्ड डिपॉजिट्स" OR "डिजिटल एसेट्स" OR "ब्लॉकचेन सेटलमेंट" OR "संस्थागत ब्लॉकचेन" OR "विनियमित DeFi" OR स्मार्ट कॉन्ट्रैक्ट्स)',
+            '("JPMorgan" OR "JPMorgan Chase" OR "JP Morgan Payments") ("वित्तीय बुनियादी ढांचा" OR "होलसेल पेमेंट्स" OR "प्रोग्रामेबल पेमेंट्स" OR "रियल-टाइम ट्रेजरी" OR "सीमा पार भुगतान")',
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase") ("AI बैंकिंग" OR "जेनेरेटिव AI" OR "Agentic AI" OR "एम्बेडेड फाइनेंस" OR "API बैंकिंग" OR BaaS OR "प्राइवेट क्रेडिट" OR "संस्थागत निवेश")',
+        ],
+    },
 }
 
 MERCADOS_ALVO = [
