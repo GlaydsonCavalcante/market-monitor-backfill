@@ -86,6 +86,62 @@ MONITORAMENTOS = {
             '("Revolut" OR "Revolut Bank") (compliance OR "regulatory restrictions" OR fraud OR "financial crime prevention")',
         ],
     },
+    "Caixa Economica Federal": {
+        "zh": [
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem" OR "Caixa Habitação") ("住房贷款" OR "房地产信贷" OR "Minha Casa Minha Vida" OR SFH OR SBPE OR 住房融资 OR LCI OR 资产证券化)',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("社会福利" OR "普惠金融" OR "数字政府" OR "生成式AI" OR "数字化服务" OR 自动化 OR Pix OR "开放银行")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Empresas" OR "Caixa Asset") ("农业信贷" OR Pronaf OR 运营转型 OR 生产力 OR 盈利能力 OR 数字化转型)',
+        ],
+        "en": [
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem" OR "Caixa Habitação") ("mortgage lending" OR "real estate funding" OR "Minha Casa Minha Vida" OR SFH OR SBPE OR LCI OR securitization)',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("social programs" OR "financial inclusion" OR "digital welfare" OR "generative AI" OR Pix OR "Open Finance")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Empresas" OR "Caixa Asset") ("rural credit" OR Pronaf OR agribusiness OR efficiency OR "operational transformation")',
+        ],
+    },
+    "Itau": {
+        "zh": [
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itau Unibanco" OR "Itaú BBA" OR "iti") ("生成式AI" OR "AI智能体" OR "对话式银行" OR "金融Copilot" OR "智能投顾" OR "规模化个性化" OR IAI)',
+            '("Itaú" OR "Itau" OR "Itaú Private" OR "Itaú Asset" OR "Itaú Personnalité") ("财富管理" OR 投顾咨询 OR "全球资产配置" OR 先锋领航 OR Vanguard OR 高净值客户 OR "富裕客群")',
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Rede") ("嵌入式金融" OR "BaaS金融即服务" OR APIs OR "开放银行" OR Superapp OR "企业信贷" OR 绿色金融 OR ESG)',
+        ],
+        "en": [
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itaú BBA" OR "iti") ("generative AI" OR "AI agents" OR "conversational banking" OR "financial copilots" OR "AI investing" OR "wealth management")',
+            '("Itaú" OR "Itau" OR "Itaú Private" OR "Itaú Asset") (Vanguard OR "global allocation" OR "embedded finance" OR BaaS OR APIs OR "Open Finance" OR "green finance" OR ESG)',
+        ],
+    },
+    "Bradesco": {
+        "zh": [
+            '("Bradesco" OR "Banco Bradesco" OR "Next" OR "Ágora") (BIA OR "BIA GenAI" OR "对话式银行" OR "金融AI助手" OR "AI-first银行" OR "BIA Tech")',
+            '("Bradesco" OR "Banco Bradesco") (网点缩减 OR 降本增效 OR 运营转型 OR 数字化 OR "Meu Bradesco" OR "开放金融" OR "气候保险" OR "参数化保险")',
+            '("Bradesco" OR "Bradesco Asset" OR "BBI" OR "Inovabra") ("数字资产" OR 资产代币化 OR 数字托管 OR 加密资产 OR "开发者生产力")',
+        ],
+        "en": [
+            '("Bradesco" OR "Banco Bradesco" OR "Next" OR "Ágora") (BIA OR "BIA GenAI" OR "conversational banking" OR "financial assistant" OR "AI-first banking" OR "BIA Tech")',
+            '("Bradesco" OR "Banco Bradesco" OR "Bradesco Seguros") ("cost reduction" OR "branch closures" OR "climate insurance" OR "digital assets" OR tokenization OR "Open Finance")',
+        ],
+    },
+    "Bank of America": {
+        "zh": [
+            '("Bank of America" OR "BofA" OR "美银" OR "Merrill Lynch") ("数字银行" OR "智能体银行" OR "Agentic AI" OR "AI智能体" OR "自主金融" OR "金融Copilot")',
+            '("BofA Institute" OR "BofA Global Research" OR ("Bank of America" AND ("消费趋势" OR "Z世代经济" OR "银行业未来" OR "美国消费者")))',
+            '("Bank of America" OR "BofA" OR "BofA Securities") ("实时支付" OR RTP OR "跨境支付" OR 嵌入式金融 OR 开放银行 OR 财富管理 OR 资产代币化 OR 私人信贷 OR "Jio Financial")',
+        ],
+        "en": [
+            '("Bank of America" OR "BofA" OR "Merrill Lynch" OR "Merrill") ("agentic banking" OR "agentic AI" OR "AI agents" OR "autonomous finance" OR "BofA Institute" OR "consumer trends")',
+            '("Bank of America" OR "BofA" OR "BofA Securities") ("real-time payments" OR RTP OR "cross-border payments" OR "wealth management" OR tokenization OR "private credit" OR "Jio Financial")',
+        ],
+    },
+    "JPMorgan": {
+        "zh": [
+            '("JPMorgan" OR "JPMorgan Chase" OR "摩根大通" OR "Onyx" OR "Kinexys") (代币化 OR "代币化存款" OR "数字资产" OR "区块链清算" OR "机构区块链" OR "合规DeFi" OR 智能合约)',
+            '("JPMorgan" OR "JPMorgan Chase" OR "JP Morgan Payments") ("金融基础设施" OR "批发支付" OR "可编程支付" OR "实时财资" OR "跨境支付" OR "企业支付")',
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase") ("AI银行" OR "生成式AI" OR "Agentic AI" OR 嵌入式金融 OR "API银行" OR BaaS OR "私人信贷" OR "机构投资")',
+        ],
+        "en": [
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase" OR "Onyx" OR "Kinexys") (tokenization OR "tokenized deposits" OR "digital assets" OR "blockchain settlement" OR "institutional blockchain" OR "regulated DeFi")',
+            '("JPMorgan" OR "JPMorgan Chase" OR "JP Morgan Payments") ("wholesale payments" OR "programmable payments" OR "real-time treasury" OR "AI banking" OR "generative AI" OR "agentic AI" OR "private credit")',
+        ],
+    },
 }
 
 MERCADOS_ALVO = [
