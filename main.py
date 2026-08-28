@@ -147,7 +147,7 @@ def executar_pipeline(caminho_config: str) -> None:
   # 6. Despacho Telegram
   enviar_telegram(
       regiao_nome=regiao,
-      # arquivos=[nome_json, nome_excel],
+      arquivos=[nome_json],
       total_brutas=len(raw_articles),
       total_clusters=len(clusters),
       total_processadas=len(processed_results),
