@@ -56,6 +56,41 @@ MONITORAMENTOS = {
             '("Revolut" OR "Revolut Bank") (컴플라이언스 OR 규제제한 OR 부정결제방지 OR 금융범죄예방 OR 스폰서십)',
         ]
     },
+    "Caixa Economica Federal": {
+        "ko": [
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem" OR "Caixa Habitação") ("주택담보대출" OR "부동산 대출" OR "Minha Casa Minha Vida" OR SFH OR SBPE OR 주택금융 OR LCI OR 유동화)',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("사회 복지" OR "포용적 금융" OR "디지털 정부" OR "생성형 AI" OR "디지털 상담" OR 자동화 OR Pix OR "오픈 파이낸스")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Empresas" OR "Caixa Asset") ("농업 금융" OR Pronaf OR 경영효율화 OR 수익성 OR "운영 혁신" OR 기술현대화)',
+        ]
+    },
+    "Itau": {
+        "ko": [
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itau Unibanco" OR "Itaú BBA" OR "iti") ("생성형 AI" OR "AI 에이전트" OR "대화형 뱅킹" OR "금융 코파일럿" OR "AI 투자" OR "초개인화" OR IAI)',
+            '("Itaú" OR "Itau" OR "Itaú Private" OR "Itaú Asset" OR "Itaú Personnalité") ("자산관리" OR Wealth Management OR 자문 OR "글로벌 자산배분" OR Vanguard OR 뱅가드 OR 고액자산가)',
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Rede") ("임베디드 금융" OR "Banking as a Service" OR BaaS OR APIs OR "오픈 파이낸스" OR 슈퍼앱 OR 중소기업 대출 OR ESG)',
+        ]
+    },
+    "Bradesco": {
+        "ko": [
+            '("Bradesco" OR "Banco Bradesco" OR "Next" OR "Ágora") (BIA OR "BIA GenAI" OR "대화형 뱅킹" OR "금융 AI 어시스턴트" OR "AI-first 뱅킹" OR "BIA Tech")',
+            '("Bradesco" OR "Banco Bradesco") (지점폐쇄 OR 비용절감 OR 생산성 OR 운영혁신 OR 디지털전환 OR "Meu Bradesco" OR "오픈 파이낸스")',
+            '("Bradesco Seguros" OR ("Bradesco" AND ("기후 보험" OR 파라메트릭 보험 OR 디지털 자산 OR 토큰화 OR 디지털 커스터디 OR 암호화폐)))',
+        ]
+    },
+    "Bank of America": {
+        "ko": [
+            '("Bank of America" OR "BofA" OR "뱅크오브아메리카" OR "Merrill Lynch") ("디지털 뱅킹" OR "에이전틱 뱅킹" OR "Agentic AI" OR "AI 에이전트" OR "자율 금융" OR "금융 코파일럿")',
+            '("BofA Institute" OR "BofA Global Research" OR ("Bank of America" AND ("소비 트렌드" OR "Z세대 경제" OR "은행의 미래" OR "미국 소비자")))',
+            '("Bank of America" OR "BofA" OR "BofA Securities") ("실시간 결제" OR RTP OR 즉시결제 OR 국경간 결제 OR 임베디드 금융 OR 플랫폼 경제 OR 자산 토큰화 OR 사모대출 OR "Jio Financial")',
+        ]
+    },
+    "JPMorgan": {
+        "ko": [
+            '("JPMorgan" OR "JPMorgan Chase" OR "JP모건" OR "Onyx" OR "Kinexys") (토큰화 OR 토큰화 예금 OR 디지털 자산 OR 블록체인 결제 OR 기관용 블록체인 OR 규제 준수 DeFi OR 스마트 계약)',
+            '("JPMorgan" OR "JPMorgan Chase" OR "JP Morgan Payments") ("금융 인프라" OR 도매 결제 OR 프로그래머블 결제 OR 실시간 재무 OR 국경간 결제 OR 기업 결제)',
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase") ("AI 뱅킹" OR 생성형 AI OR "Agentic AI" OR 임베디드 금융 OR API 뱅킹 OR BaaS OR 사모대출 OR 기관투자)',
+        ]
+    },
 }
 
 MERCADOS_ALVO = [
