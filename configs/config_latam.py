@@ -108,6 +108,76 @@ MONITORAMENTOS = {
             '("Revolut" OR "Revolut Bank") (compliance OR "restricciones regulatorias" OR fraudes OR "prevención de delitos financieros")',
         ],
     },
+    "Caixa Economica Federal": {
+        "pt": [
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Habitação" OR "Caixa Seguridade") ("crédito imobiliário" OR SFH OR SBPE OR "Minha Casa Minha Vida" OR "funding imobiliário" OR LCI OR "securitização imobiliária" OR "teto de juros" OR "mercado imobiliário")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("programas sociais" OR "inclusão financeira" OR "benefícios sociais" OR "digitalização de benefícios" OR "governo digital")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("IA generativa" OR "atendimento digital" OR "jornada digital" OR automação OR personalização OR Pix OR "Pix Automático" OR "Pix Garantido" OR "carteira digital" OR "Open Finance")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Empresas" OR "Caixa Asset") ("crédito rural" OR Pronaf OR "financiamento agro" OR "sustentabilidade no agro" OR eficiência OR produtividade OR rentabilidade OR "transformação operacional" OR "modernização tecnológica")',
+        ],
+        "es": [
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Habitação" OR "Caixa Seguridade") ("crédito hipotecario" OR "crédito inmobiliario" OR "Minha Casa Minha Vida" OR SFH OR SBPE OR "financiación inmobiliaria" OR LCI OR "titulización inmobiliaria" OR "techo de tasas")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("programas sociales" OR "inclusión financiera" OR "beneficios sociales" OR "digitalización de beneficios" OR "gobierno digital")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("IA generativa" OR "atención digital" OR automatización OR personalización OR Pix OR "Pix Automático" OR "billetera digital" OR "Open Finance")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Empresas" OR "Caixa Asset") ("crédito rural" OR Pronaf OR "financiamiento agro" OR eficiencia OR productividad OR rentabilidad OR "transformación operativa")',
+        ],
+    },
+    "Itau": {
+        "pt": [
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itau Unibanco" OR "Itaú BBA" OR "iti") (IAI OR "IA generativa" OR "agentes de IA" OR "banco conversacional" OR "copilots financeiros" OR "personalização em escala" OR "IA para investimentos")',
+            '("Itaú" OR "Itau" OR "Itaú Private" OR "Itaú Personnalité" OR "Itaú Asset") ("wealth management" OR advisory OR "investimentos internacionais" OR Vanguard OR "alocação global" OR "alta renda" OR "mass affluent")',
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Rede") ("embedded finance" OR "Banking as a Service" OR BaaS OR APIs OR "Open Finance" OR superapp OR "ecossistema financeiro")',
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itaú BBA") ("crédito PJ" OR "pequenas empresas" OR "crédito agro" OR "crédito sustentável" OR "crédito baseado em dados" OR "finanças verdes" OR ESG OR "agricultura regenerativa" OR descarbonização OR "creator economy" OR atletas)',
+        ],
+        "es": [
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itau Unibanco" OR "Itaú BBA" OR "iti") (IAI OR "IA generativa" OR "agentes de IA" OR "banca conversacional" OR "copilotos financieros" OR "personalización a escala" OR "IA para inversiones")',
+            '("Itaú" OR "Itau" OR "Itaú Private" OR "Itaú Personnalité" OR "Itaú Asset") ("wealth management" OR asesoría OR "inversiones internacionales" OR Vanguard OR "asignación global" OR "alta renta" OR "mass affluent")',
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Rede") ("embedded finance" OR "Banking as a Service" OR BaaS OR APIs OR "Open Finance" OR superapp OR "ecosistema financiero")',
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itaú BBA") ("crédito PJ" OR "pequeñas empresas" OR "crédito agro" OR "finanzas verdes" OR ESG OR "agricultura regenerativa" OR descarbonización OR "creator economy")',
+        ],
+    },
+    "Bradesco": {
+        "pt": [
+            '("Bradesco" OR "Banco Bradesco" OR "Next" OR "Ágora") (BIA OR "BIA GenAI" OR "conversational banking" OR "assistente financeira" OR "IA transacional" OR "AI-first banking" OR "banco personalizado" OR "BIA Tech")',
+            '("Bradesco" OR "Banco Bradesco") ("fechamento de agências" OR "redução de custos" OR produtividade OR "transformação operacional" OR digitalização OR "Meu Bradesco" OR "marketplace financeiro" OR "Open Finance" OR APIs)',
+            '("Bradesco Seguros" OR ("Bradesco" AND ("seguro climático" OR "seguro paramétrico" OR "adaptação climática" OR "proteção integrada")))',
+            '("Bradesco" OR "Bradesco Asset" OR "BBI" OR "Inovabra") ("ativos digitais" OR tokenização OR "custódia digital" OR criptomoedas OR "tokenized assets" OR "desenvolvedores" OR "IA para produtividade")',
+        ],
+        "es": [
+            '("Bradesco" OR "Banco Bradesco" OR "Next" OR "Ágora") (BIA OR "BIA GenAI" OR "banca conversacional" OR "asistente financiero" OR "IA transaccional" OR "AI-first banking" OR "banco personalizado" OR "BIA Tech")',
+            '("Bradesco" OR "Banco Bradesco") ("cierre de sucursales" OR "reducción de costes" OR productividad OR "transformación operativa" OR digitalización OR "Meu Bradesco" OR "marketplace financiero" OR "Open Finance")',
+            '("Bradesco Seguros" OR ("Bradesco" AND ("seguro climático" OR "seguro paramétrico" OR "adaptación climática" OR "protección integrada")))',
+            '("Bradesco" OR "Bradesco Asset" OR "BBI" OR "Inovabra") ("activos digitales" OR tokenización OR "custodia digital" OR criptomonedas OR "tokenized assets" OR "IA para productividad")',
+        ],
+    },
+    "Bank of America": {
+        "pt": [
+            '("Bank of America" OR "BofA" OR "Merrill Lynch" OR "Merrill") ("digital banking" OR "agentic banking" OR "agentic AI" OR "agentes de IA" OR "autonomous finance" OR "copilots financeiros")',
+            '("BofA Institute" OR "BofA Global Research" OR ("Bank of America" AND ("tendências de consumo" OR "Gen Z economy" OR "futuro dos bancos" OR "consumidor americano")))',
+            '("Bank of America" OR "BofA" OR "BofA Securities") ("pagamentos em tempo real" OR RTP OR "pagamentos instantâneos" OR "cross-border payments" OR "embedded finance" OR "platform economy" OR "open banking")',
+            '("Bank of America" OR "BofA" OR "Merrill") ("wealth management" OR "asset management" OR tokenização OR "tokenized assets" OR "crédito privado" OR "investimentos alternativos" OR "Jio Financial" OR "Jio Credit" OR "mercados emergentes")',
+        ],
+        "es": [
+            '("Bank of America" OR "BofA" OR "Merrill Lynch" OR "Merrill") ("banca digital" OR "agentic banking" OR "agentic AI" OR "agentes de IA" OR "finanzas autónomas" OR "copilotos financieros")',
+            '("BofA Institute" OR "BofA Global Research" OR ("Bank of America" AND ("tendencias de consumo" OR "economía Gen Z" OR "futuro de la banca" OR "consumidor estadounidense")))',
+            '("Bank of America" OR "BofA" OR "BofA Securities") ("pagos en tiempo real" OR RTP OR "pagos instantáneos" OR "cross-border payments" OR "embedded finance" OR "economía de plataformas" OR "open banking")',
+            '("Bank of America" OR "BofA" OR "Merrill") ("wealth management" OR "asset management" OR tokenización OR "activos tokenizados" OR "crédito privado" OR "inversiones alternativas" OR "Jio Financial" OR "mercados emergentes")',
+        ],
+    },
+    "JPMorgan": {
+        "pt": [
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase" OR "Onyx" OR "Kinexys") (tokenização OR "depósitos tokenizados" OR "ativos digitais" OR "liquidação em blockchain" OR "blockchain institucional" OR "DeFi regulado" OR "smart contracts")',
+            '("JPMorgan" OR "JPMorgan Chase" OR "JP Morgan Payments") ("infraestrutura financeira" OR "pagamentos corporativos" OR "wholesale payments" OR "pagamentos programáveis" OR "tesouraria em tempo real" OR "cross-border payments" OR "corporate payments")',
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase") ("IA nos bancos" OR "IA generativa" OR "agentic AI" OR "IA em mercados" OR "IA para investimentos" OR "embedded finance" OR "API banking" OR BaaS)',
+            '("JPMorgan Asset Management" OR ("JPMorgan" AND ("crédito privado" OR "mercados privados" OR "ativos alternativos" OR "investimento institucional" OR "digital cash")))',
+        ],
+        "es": [
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase" OR "Onyx" OR "Kinexys") (tokenización OR "depósitos tokenizados" OR "activos digitales" OR "liquidación en blockchain" OR "blockchain institucional" OR "DeFi regulado" OR "smart contracts")',
+            '("JPMorgan" OR "JPMorgan Chase" OR "JP Morgan Payments") ("infraestructura financiera" OR "pagos mayoristas" OR "pagos programables" OR "tesorería en tiempo real" OR "pagos transfronterizos" OR "servicios de tesorería")',
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase") ("IA en banca" OR "IA generativa" OR "agentic AI" OR "IA en mercados" OR "embedded finance" OR "API banking" OR BaaS)',
+            '("JPMorgan Asset Management" OR ("JPMorgan" AND ("crédito privado" OR "mercados privados" OR "activos alternativos" OR "inversión institucional" OR "digital cash")))',
+        ],
+    },
 }
 
 MERCADOS_ALVO = [
