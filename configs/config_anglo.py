@@ -66,6 +66,46 @@ MONITORAMENTOS = {
             '("Revolut" OR "Revolut Bank") (compliance OR "regulatory restrictions" OR fraud OR "financial crime prevention" OR lifestyle)',
         ]
     },
+    "Caixa Economica Federal": {
+        "en": [
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Habitação" OR "Caixa Seguridade") ("mortgage lending" OR "housing credit" OR "real estate funding" OR SFH OR SBPE OR "Minha Casa Minha Vida" OR LCI OR securitization OR "interest rate cap")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("social programs" OR "financial inclusion" OR "social benefits" OR "digital welfare" OR "digital government")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("generative AI" OR "digital service" OR automation OR personalization OR Pix OR "Open Finance" OR "digital wallet")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Empresas" OR "Caixa Asset") ("rural credit" OR Pronaf OR "agribusiness financing" OR efficiency OR profitability OR "operational transformation" OR "technological modernization")',
+        ]
+    },
+    "Itau": {
+        "en": [
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itau Unibanco" OR "Itaú BBA" OR "iti") ("generative AI" OR "AI agents" OR "conversational banking" OR "financial copilots" OR "AI investing" OR "personalization at scale" OR IAI)',
+            '("Itaú" OR "Itau" OR "Itaú Private" OR "Itaú Asset" OR "Itaú Personnalité") ("wealth management" OR advisory OR "international investments" OR Vanguard OR "global allocation" OR "mass affluent" OR "high income")',
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Rede") ("embedded finance" OR "Banking as a Service" OR BaaS OR APIs OR "Open Finance" OR superapp OR "financial ecosystem")',
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itaú BBA") ("corporate credit" OR "SME credit" OR "agribusiness credit" OR "green finance" OR ESG OR "regenerative agriculture" OR decarbonization OR "creator economy")',
+        ]
+    },
+    "Bradesco": {
+        "en": [
+            '("Bradesco" OR "Banco Bradesco" OR "Next" OR "Ágora" OR "Agora") (BIA OR "BIA GenAI" OR "conversational banking" OR "financial assistant" OR "transactional AI" OR "AI-first banking" OR "BIA Tech")',
+            '("Bradesco" OR "Banco Bradesco") ("branch closures" OR "cost reduction" OR productivity OR "operational transformation" OR digitalization OR "Meu Bradesco" OR "financial marketplace" OR "Open Finance")',
+            '("Bradesco Seguros" OR ("Bradesco" AND ("climate insurance" OR "parametric insurance" OR "climate adaptation" OR "integrated protection")))',
+            '("Bradesco" OR "Bradesco Asset" OR "BBI" OR "Inovabra") ("digital assets" OR tokenization OR "digital custody" OR crypto OR "tokenized assets" OR "developer productivity")',
+        ]
+    },
+    "Bank of America": {
+        "en": [
+            '("Bank of America" OR "BofA" OR "Merrill Lynch" OR "Merrill") ("digital banking" OR "agentic banking" OR "agentic AI" OR "AI agents" OR "autonomous finance" OR "financial copilots")',
+            '("BofA Institute" OR "BofA Global Research" OR ("Bank of America" AND ("consumer trends" OR "Gen Z economy" OR "future of banking" OR "US consumer")))',
+            '("Bank of America" OR "BofA" OR "BofA Securities") ("real-time payments" OR RTP OR "instant payments" OR "cross-border payments" OR "embedded finance" OR "platform economy" OR "open banking")',
+            '("Bank of America" OR "BofA" OR "Merrill") ("asset management" OR "wealth management" OR tokenization OR "tokenized assets" OR "private credit" OR "alternative investments" OR "Jio Financial" OR "Jio Credit" OR "India growth")',
+        ]
+    },
+    "JPMorgan": {
+        "en": [
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase" OR "Onyx" OR "Kinexys") (tokenization OR "tokenized deposits" OR "digital assets" OR "asset tokenization" OR "blockchain settlement" OR "institutional blockchain" OR "regulated DeFi" OR "smart contracts")',
+            '("JPMorgan" OR "JPMorgan Chase" OR "JP Morgan Payments") ("financial infrastructure" OR "wholesale payments" OR "programmable payments" OR "real-time treasury" OR "cross-border payments" OR "treasury services" OR "corporate payments")',
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase") ("AI banking" OR "generative AI" OR "agentic AI" OR "AI in markets" OR "AI investing" OR "embedded finance" OR "API banking" OR "Banking as a Service" OR BaaS)',
+            '("JPMorgan Asset Management" OR ("JPMorgan" AND ("private credit" OR "private markets" OR "alternative assets" OR "institutional investing" OR "digital cash")))',
+        ]
+    },
 }
 
 MERCADOS_ALVO = [
