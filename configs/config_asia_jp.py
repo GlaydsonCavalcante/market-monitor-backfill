@@ -56,6 +56,41 @@ MONITORAMENTOS = {
             '("Revolut" OR "Revolut Bank") (コンプライアンス OR 規制制約 OR 不正対策 OR 金融犯罪防止 OR スポンサーシップ)',
         ]
     },
+    "Caixa Economica Federal": {
+        "ja": [
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem" OR "Caixa Habitação") ("住宅ローン" OR "不動産融資" OR "Minha Casa Minha Vida" OR SFH OR SBPE OR 住宅資金 OR LCI OR 証券化)',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Tem") ("社会保障" OR "金融包摂" OR "デジタル行政" OR "生成AI" OR "デジタル接客" OR 自動化 OR Pix OR "オープンファイナンス")',
+            '("Caixa Econômica Federal" OR "Caixa Economica" OR "CEF" OR "Caixa Empresas" OR "Caixa Asset") ("農業融資" OR Pronaf OR 業務効率化 OR 収益性 OR "業務変革" OR 技術近代化)',
+        ]
+    },
+    "Itau": {
+        "ja": [
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Itau Unibanco" OR "Itaú BBA" OR "iti") ("生成AI" OR "AIエージェント" OR "対話型バンキング" OR "金融コパイロット" OR "AI投資" OR "パーソナライゼーション" OR IAI)',
+            '("Itaú" OR "Itau" OR "Itaú Private" OR "Itaú Asset" OR "Itaú Personnalité") ("ウェルスマネジメント" OR 資産運用助言 OR "海外投資" OR Vanguard OR バンガード OR グローバル分散投資 OR 富裕層)',
+            '("Itaú" OR "Itau" OR "Itaú Unibanco" OR "Rede") ("埋め込み型金融" OR "Embedded Finance" OR "Banking as a Service" OR BaaS OR APIs OR "オープンファイナンス" OR スーパーアプリ OR 中小企業融資 OR ESG)',
+        ]
+    },
+    "Bradesco": {
+        "ja": [
+            '("Bradesco" OR "Banco Bradesco" OR "Next" OR "Ágora") (BIA OR "BIA GenAI" OR "対話型バンキング" OR "金融アシスタント" OR "AIファーストバンキング" OR "BIA Tech")',
+            '("Bradesco" OR "Banco Bradesco") (店舗閉鎖 OR コスト削減 OR 生産性 OR 業務変革 OR デジタル化 OR "Meu Bradesco" OR "金融マーケットプレイス" OR "オープンファイナンス")',
+            '("Bradesco Seguros" OR ("Bradesco" AND ("気候保険" OR パラメトリック保険 OR デジタル資産 OR トークン化 OR デジタルカストディ OR 暗号資産)))',
+        ]
+    },
+    "Bank of America": {
+        "ja": [
+            '("Bank of America" OR "BofA" OR "バンク・オブ・アメリカ" OR "Merrill Lynch") ("デジタルバンキング" OR "エージェンティックバンキング" OR "Agentic AI" OR "自律型金融" OR "金融コパイロット")',
+            '("BofA Institute" OR "BofA Global Research" OR ("Bank of America" AND ("消費トレンド" OR "Z世代経済" OR "銀行の未来" OR "米国消費者")))',
+            '("Bank of America" OR "BofA" OR "BofA Securities") ("リアルタイム決済" OR RTP OR 即時決済 OR 国境間送金 OR 組込型金融 OR プラットフォーム経済 OR 資産トークン化 OR プライベートクレジット OR "Jio Financial")',
+        ]
+    },
+    "JPMorgan": {
+        "ja": [
+            '("JPMorgan" OR "JPMorgan Chase" OR "JPモルガン" OR "Onyx" OR "Kinexys") (トークン化 OR トークン化預金 OR デジタル資産 OR ブロックチェーン決済 OR 機関向けブロックチェーン OR 規制準拠DeFi OR スマートコントラクト)',
+            '("JPMorgan" OR "JPMorgan Chase" OR "JP Morgan Payments") ("金融インフラ" OR ホールセール決済 OR プログラマブル決済 OR リアルタイムトレジャリー OR 国境間送金 OR 企業間決済)',
+            '("JPMorgan" OR "JPMorgan Chase" OR "Chase") ("AIバンキング" OR 生成AI OR "Agentic AI" OR 組込型金融 OR APIバンキング OR BaaS OR プライベートクレジット OR 機関投資家)',
+        ]
+    },
 }
 
 MERCADOS_ALVO = [
