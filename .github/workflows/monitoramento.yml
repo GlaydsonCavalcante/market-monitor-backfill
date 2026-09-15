@@ -59,7 +59,7 @@ jobs:
           SHARD_NAME: ${{ matrix.shard }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "405898240,5401165820,8998554084"
-        run: python main.py --config config_${{ matrix.shard }}.py
+        run: python main.py --config configs/config_${{ matrix.shard }}.py
 
       - name: Notificar falha via Telegram
         if: failure()
