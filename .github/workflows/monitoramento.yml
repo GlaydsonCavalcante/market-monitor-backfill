@@ -13,12 +13,24 @@ jobs:
     strategy:
       fail-fast: false # Garante que a falha de um shard NÃO cancela os demais
       matrix:
-        shard: [latam, anglo, europa, asia_jp, asia_kr, asia_china_sg, mea]
+        # Lista com todos os novos configs criados
+        shard:
+          - latam_fintechs
+          - latam_plataformas
+          - latam_tendencias
+          - anglo_fintechs
+          - anglo_plataformas
+          - anglo_tendencias
+          - europa
+          - asia_cn_sg
+          - asia_jp_kr
+          - mea_india
 
     steps:
       - name: Baixar codigo do repositorio
         uses: actions/checkout@v4
 
+      # Mantido: previne estouro de armazenamento no ambiente do runner
       - name: Liberar espaco em disco no Runner
         run: |
           sudo rm -rf /usr/share/dotnet
@@ -31,11 +43,12 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Cache do Modelo BGE-M3
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/huggingface
-          key: ${{ runner.os }}-hf-bge-m3
+      # Mantido/Comentado: pronto para reativação caso volte a vetorizar com BGE-M3 no GitHub
+      # - name: Cache do Modelo BGE-M3
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: ~/.cache/huggingface
+      #     key: ${{ runner.os }}-hf-bge-m3
 
       - name: Instalar dependencias (PyTorch CPU)
         run: pip install -r requirements.txt
@@ -52,7 +65,7 @@ jobs:
         if: failure()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: "405898240,5401165820"
+          TELEGRAM_CHAT_ID: "405898240,5401165820,8998554084"
           SHARD_NAME: ${{ matrix.shard }}
         run: |
           python -c '
