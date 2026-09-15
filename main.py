@@ -102,12 +102,12 @@ def executar_pipeline(caminho_config: str) -> None:
           flush=True,
       )
 
-  # 4. Vetorização 1024d em Lote (Batching BGE-M3)
-  processor.gerar_vetores_em_lote(
-      processed_results=processed_results,
-      termos_descarte_dict=cfg.TERMOS_DESCARTE_TEXTO,
-      model_name=cfg.MODELO_EMBEDDING_1024,
-  )
+  # # 4. Vetorização 1024d em Lote (Batching BGE-M3)
+  # processor.gerar_vetores_em_lote(
+  #     processed_results=processed_results,
+  #     termos_descarte_dict=cfg.TERMOS_DESCARTE_TEXTO,
+  #     model_name=cfg.MODELO_EMBEDDING_1024,
+  # )
 
   # 5. Exporta o JSON com vetor_1024 compactado em linha única
   json_formatado = json.dumps(processed_results, ensure_ascii=False, indent=2)
