@@ -7,7 +7,7 @@ import re
 import urllib.parse
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
-from googlenewsdecoder import new_decoderv1
+import googlenewsdecoder
 import numpy as np
 import requests
 from sentence_transformers import SentenceTransformer
