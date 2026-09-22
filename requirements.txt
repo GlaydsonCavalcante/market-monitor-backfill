@@ -8,3 +8,4 @@ trafilatura
 rapidfuzz
 googlenewsdecoder
 beautifulsoup4
+googlenewsdecoder==0.1.4
