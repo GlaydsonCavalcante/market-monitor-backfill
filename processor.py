@@ -141,24 +141,59 @@ def decode_token_offline(token: str) -> str:
 
 
 def resolve_publisher_url(google_news_url: str) -> str:
-  if not google_news_url or "news.google.com" not in google_news_url:
+    """Decodifica a URL de redirecionamento do Google News para a URL canônica de destino.
+    
+    Tenta decodificação offline via token base64. Caso indisponível, delega
+    para o decodificador da biblioteca `googlenewsdecoder`.
+    
+    Raises:
+        AttributeError: Caso a biblioteca `googlenewsdecoder` não possua método de decodificação suportado.
+        TypeError: Caso o retorno da decodificação não respeite o formato de dicionário ou string esperado.
+    """
+    if not google_news_url or "news.google.com" not in google_news_url:
+        return google_news_url
+
+    clean_url = google_news_url.split("?")[0].strip()
+    match = re.search(r"/articles/([^/?&]+)", clean_url)
+    token = match.group(1) if match else None
+
+    if token:
+        extracted = decode_token_offline(token)
+        if extracted:
+            return extracted
+
+    # Identificação determinística do método de decodificação exposto pelo pacote
+    if hasattr(googlenewsdecoder, "decoderv1"):
+        decode_fn = googlenewsdecoder.decoderv1
+    elif hasattr(googlenewsdecoder, "new_decoderv1"):
+        decode_fn = googlenewsdecoder.new_decoderv1
+    elif hasattr(googlenewsdecoder, "decode"):
+        decode_fn = googlenewsdecoder.decode
+    else:
+        raise AttributeError(
+            "O módulo 'googlenewsdecoder' não expõe nenhuma função de decodificação compatível "
+            "('decoderv1', 'new_decoderv1' ou 'decode'). Verifique a versão instalada."
+        )
+
+    # Execução direta: erros de rede, timeout ou exceções internas do pacote quebram o fluxo
+    res = decode_fn(google_news_url)
+
+    if isinstance(res, dict):
+        if not res.get("status"):
+            # Falha reportada pelo próprio decodificador: preserva URL para registro de bloqueio downstream
+            return google_news_url
+        decoded = res.get("decoded_url")
+        if decoded and decoded.startswith("http") and "news.google.com" not in decoded:
+            return decoded
+    elif isinstance(res, str):
+        if res.startswith("http") and "news.google.com" not in res:
+            return res
+    else:
+        raise TypeError(
+            f"Retorno inesperado de {decode_fn.__name__}: esperava dict ou str, recebido {type(res).__name__}."
+        )
+
     return google_news_url
-  clean_url = google_news_url.split("?")[0].strip()
-  match = re.search(r"/articles/([^/?&]+)", clean_url)
-  token = match.group(1) if match else None
-  if token:
-    extracted = decode_token_offline(token)
-    if extracted:
-      return extracted
-  try:
-    res = new_decoderv1(google_news_url)
-    if res.get("status") and res.get("decoded_url"):
-      decoded = res["decoded_url"]
-      if decoded.startswith("http") and "news.google.com" not in decoded:
-        return decoded
-  except Exception:
-    pass
-  return google_news_url
 
 
 def scrape_article_text(url: str, timeout: int = 5) -> tuple:
