@@ -50,8 +50,12 @@ jobs:
       #     path: ~/.cache/huggingface
       #     key: ${{ runner.os }}-hf-bge-m3
 
-      - name: Instalar dependencias (PyTorch CPU)
-        run: pip install -r requirements.txt
+      - name: Instalar dependencias e Navegador Headless
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          playwright install chromium
+          playwright install-deps chromium
 
       - name: Executar Pipeline do Shard [${{ matrix.shard }}]
         env:
