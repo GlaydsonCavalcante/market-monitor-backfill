@@ -141,78 +141,68 @@ def decode_token_offline(token: str) -> str:
 
 
 def resolve_publisher_url(google_news_url: str) -> str:
-    """Decodifica a URL de redirecionamento do Google News para a URL canônica de destino.
-    
-    Tenta decodificação offline via token base64. Caso indisponível, delega
-    para o decodificador da biblioteca `googlenewsdecoder`.
-    
-    Raises:
-        AttributeError: Caso a biblioteca `googlenewsdecoder` não possua método de decodificação suportado.
-        TypeError: Caso o retorno da decodificação não respeite o formato de dicionário ou string esperado.
-    """
+    """Decodifica URLs do Google News combinando método offline e RPC atualizado."""
     if not google_news_url or "news.google.com" not in google_news_url:
         return google_news_url
 
+    # 1. Tentativa offline via regex e base64
     clean_url = google_news_url.split("?")[0].strip()
     match = re.search(r"/articles/([^/?&]+)", clean_url)
-    token = match.group(1) if match else None
-
-    if token:
-        extracted = decode_token_offline(token)
-        if extracted:
+    if match:
+        extracted = decode_token_offline(match.group(1))
+        if extracted and "google.com" not in extracted:
             return extracted
 
-    # Identificação determinística do método de decodificação exposto pelo pacote
-    if hasattr(googlenewsdecoder, "decoderv1"):
-        decode_fn = googlenewsdecoder.decoderv1
-    elif hasattr(googlenewsdecoder, "new_decoderv1"):
-        decode_fn = googlenewsdecoder.new_decoderv1
-    elif hasattr(googlenewsdecoder, "decode"):
-        decode_fn = googlenewsdecoder.decode
-    else:
-        raise AttributeError(
-            "O módulo 'googlenewsdecoder' não expõe nenhuma função de decodificação compatível "
-            "('decoderv1', 'new_decoderv1' ou 'decode'). Verifique a versão instalada."
-        )
-
-    # Execução direta: erros de rede, timeout ou exceções internas do pacote quebram o fluxo
-    res = decode_fn(google_news_url)
-
-    if isinstance(res, dict):
-        if not res.get("status"):
-            # Falha reportada pelo próprio decodificador: preserva URL para registro de bloqueio downstream
-            return google_news_url
-        decoded = res.get("decoded_url")
-        if decoded and decoded.startswith("http") and "news.google.com" not in decoded:
-            return decoded
-    elif isinstance(res, str):
-        if res.startswith("http") and "news.google.com" not in res:
-            return res
-    else:
-        raise TypeError(
-            f"Retorno inesperado de {decode_fn.__name__}: esperava dict ou str, recebido {type(res).__name__}."
-        )
+    # 2. Resolução via biblioteca googlenewsdecoder atualizada
+    try:
+        res = googlenewsdecoder.decoderv1(google_news_url, interval=0.1)
+        if isinstance(res, dict) and res.get("status"):
+            decoded = res.get("decoded_url")
+            if decoded and decoded.startswith("http") and "news.google.com" not in decoded:
+                return decoded
+    except Exception as exc:
+        print(f"[AVISO] Falha ao decodificar via RPC: {exc}", flush=True)
 
     return google_news_url
 
 
+PADROES_ANTIBOT = [
+    r"unsanctioned scraping by bots",
+    r"attention required!? \| cloudflare",
+    r"please verify you are a human",
+    r"access denied",
+    r"verifique se você é humano",
+    r"ative o javascript",
+    r"ddos protection by cloudflare",
+]
+REGEX_ANTIBOT = re.compile("|".join(PADROES_ANTIBOT), re.IGNORECASE)
+
 def scrape_article_text(url: str, timeout: int = 5) -> tuple:
-  real_url = resolve_publisher_url(url)
-  if "news.google.com" in real_url:
-    return None, "FALHA_DECODIFICACAO_URL", real_url
-  try:
+    """Extrai conteúdo textual da matéria via HTTP rápido com verificação anti-bot."""
+    real_url = resolve_publisher_url(url)
+    if "news.google.com" in real_url:
+        return None, "FALHA_DECODIFICACAO_URL", real_url
+
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
-        "Accept": (
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7,es;q=0.6",
     }
-    # Timeout dividido: 3s para conectar ao servidor, 5s para baixar o HTML
-    resp = requests.get(real_url, headers=headers, timeout=(3, 5))
+    
+    # Requisição direta sem mascarar falhas de rede críticas
+    resp = requests.get(real_url, headers=headers, timeout=(3.0, float(timeout)), allow_redirects=True)
     if resp.status_code != 200:
-      return None, f"FALHA_HTTP_{resp.status_code}", real_url
+        return None, f"FALHA_HTTP_{resp.status_code}", resp.url
+
     html_content = resp.text
+    if not html_content:
+        return None, "HTML_VAZIO", resp.url
+
+    # Validação anti-bot imediata
+    if REGEX_ANTIBOT.search(html_content[:5000]):
+        return None, "BLOQUEIO_ANTIBOT", resp.url
+
+    # Extração primária via Trafilatura
     text = trafilatura.extract(
         html_content,
         include_comments=False,
@@ -220,24 +210,19 @@ def scrape_article_text(url: str, timeout: int = 5) -> tuple:
         include_links=False,
         output_format="txt",
     )
-    if not text or len(text.strip()) < 150:
-      soup = BeautifulSoup(html_content, "html.parser")
-      for tag in soup(
-          ["script", "style", "nav", "header", "footer", "aside", "form"]
-      ):
-        tag.decompose()
-      paragraphs = [
-          p.get_text().strip()
-          for p in soup.find_all("p")
-          if len(p.get_text().strip()) > 35
-      ]
-      text = "\n\n".join(paragraphs)
 
-    if text and len(text.strip()) > 150:
-      return text.strip(), "SUCESSO", real_url
-    return None, "CONTEUDO_INSUFICIENTE", real_url
-  except Exception as exc:
-    return None, f"ERRO_EXCEPTION: {str(exc)}", real_url
+    # Extração secundária via BeautifulSoup caso o Trafilatura não atinja o tamanho mínimo
+    if not text or len(text.strip()) < 150:
+        soup = BeautifulSoup(html_content, "html.parser")
+        for tag in soup(["script", "style", "nav", "header", "footer", "aside", "form"]):
+            tag.decompose()
+        paragraphs = [p.get_text().strip() for p in soup.find_all("p") if len(p.get_text().strip()) > 35]
+        text = "\n\n".join(paragraphs)
+
+    if text and len(text.strip()) >= 150 and not REGEX_ANTIBOT.search(text):
+        return text.strip(), "SUCESSO", resp.url
+
+    return None, "CONTEUDO_INSUFICIENTE", resp.url
 
 def cluster_articles(
     raw_articles: list,
