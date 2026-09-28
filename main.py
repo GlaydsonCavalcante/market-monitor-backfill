@@ -87,21 +87,33 @@ def executar_pipeline(caminho_config: str) -> None:
         cluster_item, timeout=cfg.TIMEOUT_REQUISICAO
     )
 
+  # 3.1 Estágio 1: Fast HTTP (tentativa rápida por conexão direta)
   processed_results = []
   max_workers = getattr(cfg, "MAX_WORKERS_PARALELO", 8)
-  with concurrent.futures.ThreadPoolExecutor(
-      max_workers=max_workers
-  ) as executor:
+  with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
     futuros = {executor.submit(worker, c): c for c in clusters}
     for i, futuro in enumerate(concurrent.futures.as_completed(futuros), 1):
       res = futuro.result()
       processed_results.append(res)
-      status_ico = "✅" if res["status_extracao"] == "SUCESSO" else "🔒"
-      print(
-          f"[{i}/{len(clusters)}] {status_ico} {res['titulo'][:60]}...",
-          flush=True,
-      )
 
+  sucessos_estagio1 = sum(1 for r in processed_results if r["status_extracao"] == "SUCESSO")
+  print(f">> Estágio 1 (HTTP) concluído: {sucessos_estagio1}/{len(clusters)} extraídos com sucesso.", flush=True)
+
+  # 3.2 Estágio 2: Headless Browser Playwright (apenas para quem ficou bloqueado)
+  bloqueados_indices = [i for i, r in enumerate(processed_results) if r["status_extracao"] != "SUCESSO"]
+  if bloqueados_indices:
+    print(f">> Estágio 2: Ativando Playwright Stealth para {len(bloqueados_indices)} matérias protegidas...", flush=True)
+    itens_para_pw = [processed_results[i] for i in bloqueados_indices]
+    itens_recuperados = processor.executar_fallback_playwright(itens_para_pw)
+    
+    # Atualiza a lista principal com os resgates do Playwright
+    for pos, idx_original in enumerate(bloqueados_indices):
+      processed_results[idx_original] = itens_recuperados[pos]
+
+  for i, res in enumerate(processed_results, 1):
+    status_ico = "✅" if res["status_extracao"] == "SUCESSO" else "🔒"
+    print(f"[{i}/{len(clusters)}] {status_ico} {res['titulo'][:60]}...", flush=True)
+    
   # # 4. Vetorização 1024d em Lote (Batching BGE-M3)
   # processor.gerar_vetores_em_lote(
   #     processed_results=processed_results,
