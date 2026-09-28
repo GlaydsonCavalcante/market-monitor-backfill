@@ -14,6 +14,8 @@ from sentence_transformers import SentenceTransformer
 import trafilatura
 import math
 import time
+import asyncio
+from playwright.async_api import async_playwright
 
 USER_AGENTS = [
     (
@@ -416,3 +418,93 @@ def gerar_vetores_em_lote(
       f"Vetorização finalizada com sucesso! Tempo total: {tempo_total:.2f}s\n",
       flush=True,
   )
+
+async def _navegar_playwright_item(context, item: dict) -> dict:
+    """Abre a URL (mesmo do Google News) no Chromium, resolve redirecionamentos e extrai o texto."""
+    url_alvo = item.get("url_utilizada") or item.get("url_primaria") or ""
+    page = None
+    try:
+        page = await context.new_page()
+        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        # Aborta imagens e fontes para economizar CPU e tempo
+        await page.route(
+            "**/*",
+            lambda r: r.abort() if r.request.resource_type in ["image", "media", "font", "stylesheet"] else r.continue_()
+        )
+        await page.goto(url_alvo, wait_until="domcontentloaded", timeout=6000)
+
+        # Transpõe muralhas de consentimento do Google
+        if "consent.google" in page.url or "google.com" in page.url:
+            for sel in ["button:has-text('Aceitar tudo')", "button:has-text('Concordo')", "button:has-text('Accept all')"]:
+                try:
+                    btn = page.locator(sel).first
+                    if await btn.is_visible(timeout=800):
+                        await btn.click()
+                        break
+                except Exception:
+                    pass
+            try:
+                await page.wait_for_url(lambda u: "google" not in u, timeout=4000)
+            except Exception:
+                pass
+
+        html_content = await page.content()
+        url_real = page.url
+
+        # Extração de texto do DOM renderizado
+        text = trafilatura.extract(html_content, include_comments=False, include_tables=False, output_format="txt")
+        if not text or len(text.strip()) < 150:
+            soup = BeautifulSoup(html_content, "html.parser")
+            for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
+                tag.decompose()
+            paragrafos = [p.get_text().strip() for p in soup.find_all("p") if len(p.get_text().strip()) > 35]
+            text = "\n\n".join(paragrafos)
+
+        if text and len(text.strip()) >= 150 and not REGEX_ANTIBOT.search(text):
+            item["texto_completo"] = text.strip()
+            item["status_extracao"] = "SUCESSO"
+            item["url_utilizada"] = url_real
+            item["motivo_bloqueio"] = None
+            item["necessita_extracao_manual"] = False
+    except Exception as e:
+        item["motivo_bloqueio"] = f"TIMEOUT_PLAYWRIGHT: {type(e).__name__}"
+    finally:
+        if page:
+            await page.close()
+    return item
+
+
+async def processar_bloqueados_playwright(itens_bloqueados: list) -> list:
+    """Executa o pool concorrente do Playwright com semáforo restrito para os itens pendentes."""
+    if not itens_bloqueados:
+        return []
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--disable-gpu"],
+        )
+        context = await browser.new_context(user_agent=random.choice(USER_AGENTS), viewport={"width": 1280, "height": 800})
+        sem = asyncio.Semaphore(4)
+
+        async def _safe_run(item):
+            async with sem:
+                try:
+                    return await asyncio.wait_for(_navegar_playwright_item(context, item), timeout=10.0)
+                except asyncio.TimeoutError:
+                    item["motivo_bloqueio"] = "DEADLOCK_TIMEOUT"
+                    return item
+
+        resultados = await asyncio.gather(*[_safe_run(item) for item in itens_bloqueados])
+        await context.close()
+        await browser.close()
+        return resultados
+
+
+def executar_fallback_playwright(itens_bloqueados: list) -> list:
+    """Interface síncrona para chamar o pool assíncrono do Playwright."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(processar_bloqueados_playwright(itens_bloqueados))
+    finally:
+        loop.close()
