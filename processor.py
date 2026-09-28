@@ -180,7 +180,7 @@ PADROES_ANTIBOT = [
 REGEX_ANTIBOT = re.compile("|".join(PADROES_ANTIBOT), re.IGNORECASE)
 
 def scrape_article_text(url: str, timeout: int = 5) -> tuple:
-    """Extrai conteúdo textual da matéria via HTTP rápido com verificação anti-bot."""
+    """Extrai conteúdo textual da matéria via HTTP rápido com captura segura de falhas de conexão."""
     real_url = resolve_publisher_url(url)
     if "news.google.com" in real_url:
         return None, "FALHA_DECODIFICACAO_URL", real_url
@@ -191,8 +191,13 @@ def scrape_article_text(url: str, timeout: int = 5) -> tuple:
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7,es;q=0.6",
     }
     
-    # Requisição direta sem mascarar falhas de rede críticas
-    resp = requests.get(real_url, headers=headers, timeout=(3.0, float(timeout)), allow_redirects=True)
+    try:
+        resp = requests.get(
+            real_url, headers=headers, timeout=(3.0, float(timeout)), allow_redirects=True
+        )
+    except requests.exceptions.RequestException as e:
+        return None, f"FALHA_CONEXAO_{type(e).__name__}", real_url
+
     if resp.status_code != 200:
         return None, f"FALHA_HTTP_{resp.status_code}", resp.url
 
@@ -200,11 +205,9 @@ def scrape_article_text(url: str, timeout: int = 5) -> tuple:
     if not html_content:
         return None, "HTML_VAZIO", resp.url
 
-    # Validação anti-bot imediata
     if REGEX_ANTIBOT.search(html_content[:5000]):
         return None, "BLOQUEIO_ANTIBOT", resp.url
 
-    # Extração primária via Trafilatura
     text = trafilatura.extract(
         html_content,
         include_comments=False,
@@ -213,7 +216,6 @@ def scrape_article_text(url: str, timeout: int = 5) -> tuple:
         output_format="txt",
     )
 
-    # Extração secundária via BeautifulSoup caso o Trafilatura não atinja o tamanho mínimo
     if not text or len(text.strip()) < 150:
         soup = BeautifulSoup(html_content, "html.parser")
         for tag in soup(["script", "style", "nav", "header", "footer", "aside", "form"]):
@@ -225,6 +227,7 @@ def scrape_article_text(url: str, timeout: int = 5) -> tuple:
         return text.strip(), "SUCESSO", resp.url
 
     return None, "CONTEUDO_INSUFICIENTE", resp.url
+
 
 def cluster_articles(
     raw_articles: list,
@@ -420,38 +423,48 @@ def gerar_vetores_em_lote(
   )
 
 async def _navegar_playwright_item(context, item: dict) -> dict:
-    """Abre a URL (mesmo do Google News) no Chromium, resolve redirecionamentos e extrai o texto."""
+    """Abre a URL no Chromium headless, gerencia consentimentos e resolve o texto final."""
     url_alvo = item.get("url_utilizada") or item.get("url_primaria") or ""
     page = None
     try:
         page = await context.new_page()
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        # Aborta imagens e fontes para economizar CPU e tempo
-        await page.route(
-            "**/*",
-            lambda r: r.abort() if r.request.resource_type in ["image", "media", "font", "stylesheet"] else r.continue_()
-        )
-        await page.goto(url_alvo, wait_until="domcontentloaded", timeout=6000)
 
-        # Transpõe muralhas de consentimento do Google
+        # Interceptador assíncrono estrito para abortar mídia sem deixar corrotinas pendentes
+        async def interceptar_recursos(route):
+            if route.request.resource_type in ["image", "media", "font", "stylesheet"]:
+                await route.abort()
+            else:
+                await route.continue_()
+
+        await page.route("**/*", interceptar_recursos)
+        await page.goto(url_alvo, wait_until="domcontentloaded", timeout=7000)
+
+        # Transposição de barreiras de consentimento do Google
         if "consent.google" in page.url or "google.com" in page.url:
             for sel in ["button:has-text('Aceitar tudo')", "button:has-text('Concordo')", "button:has-text('Accept all')"]:
                 try:
                     btn = page.locator(sel).first
-                    if await btn.is_visible(timeout=800):
+                    if await btn.is_visible(timeout=600):
                         await btn.click()
                         break
                 except Exception:
                     pass
             try:
-                await page.wait_for_url(lambda u: "google" not in u, timeout=4000)
+                await page.wait_for_url(lambda u: "google" not in u, timeout=5000)
             except Exception:
                 pass
 
-        html_content = await page.content()
         url_real = page.url
 
-        # Extração de texto do DOM renderizado
+        # Se não redirecionou para fora do Google, aborta para não capturar texto irrelevante
+        if "google.com" in url_real or "consent.google" in url_real:
+            item["status_extracao"] = "FALHA_ACESSO"
+            item["motivo_bloqueio"] = "NAO_REDIRECIONOU_GOOGLE"
+            return item
+
+        html_content = await page.content()
+
         text = trafilatura.extract(html_content, include_comments=False, include_tables=False, output_format="txt")
         if not text or len(text.strip()) < 150:
             soup = BeautifulSoup(html_content, "html.parser")
@@ -466,8 +479,13 @@ async def _navegar_playwright_item(context, item: dict) -> dict:
             item["url_utilizada"] = url_real
             item["motivo_bloqueio"] = None
             item["necessita_extracao_manual"] = False
+        else:
+            item["status_extracao"] = "TEXTO_INSUFICIENTE"
+            item["motivo_bloqueio"] = "CONTEUDO_CURTO_OU_BLOQUEADO"
+
     except Exception as e:
-        item["motivo_bloqueio"] = f"TIMEOUT_PLAYWRIGHT: {type(e).__name__}"
+        item["status_extracao"] = "TIMEOUT_BROWSER"
+        item["motivo_bloqueio"] = f"ERRO_PLAYWRIGHT: {type(e).__name__}"
     finally:
         if page:
             await page.close()
@@ -475,22 +493,32 @@ async def _navegar_playwright_item(context, item: dict) -> dict:
 
 
 async def processar_bloqueados_playwright(itens_bloqueados: list) -> list:
-    """Executa o pool concorrente do Playwright com semáforo restrito para os itens pendentes."""
+    """Executa o pool assíncrono com semáforo de 4 abas e timeout compatível com a esteira."""
     if not itens_bloqueados:
         return []
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--disable-gpu"],
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-gpu",
+            ],
         )
-        context = await browser.new_context(user_agent=random.choice(USER_AGENTS), viewport={"width": 1280, "height": 800})
+        context = await browser.new_context(
+            user_agent=random.choice(USER_AGENTS),
+            viewport={"width": 1280, "height": 800},
+        )
         sem = asyncio.Semaphore(4)
 
         async def _safe_run(item):
             async with sem:
                 try:
-                    return await asyncio.wait_for(_navegar_playwright_item(context, item), timeout=10.0)
+                    # Timeout expandido para 18 segundos para acomodar navegações lentas no runner
+                    return await asyncio.wait_for(_navegar_playwright_item(context, item), timeout=18.0)
                 except asyncio.TimeoutError:
+                    item["status_extracao"] = "TIMEOUT_BROWSER"
                     item["motivo_bloqueio"] = "DEADLOCK_TIMEOUT"
                     return item
 
@@ -498,7 +526,7 @@ async def processar_bloqueados_playwright(itens_bloqueados: list) -> list:
         await context.close()
         await browser.close()
         return resultados
-
+        
 
 def executar_fallback_playwright(itens_bloqueados: list) -> list:
     """Interface síncrona para chamar o pool assíncrono do Playwright."""
