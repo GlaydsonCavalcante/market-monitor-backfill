@@ -75,10 +75,9 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
           SHARD_NAME: ${{ matrix.shard }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_STEP_SUMMARY: ${{ env.GITHUB_STEP_SUMMARY }}
         run: python main.py --shard ${{ matrix.shard }}
-
+        
       - name: Preservar JSON em Artifacts do GitHub
         if: always()
         uses: actions/upload-artifact@v4
