@@ -1,8 +1,9 @@
 """
 processor.py
 
-Módulo otimizado: remoção de embeddings pesados na borda,
-deduplicação rápida via token sort ratio e raspagem resiliente em cascata.
+Módulo de processamento: normalização, decodificação de URLs do Google News,
+agrupamento semântico rápido (rapidfuzz), validação factual preventiva
+e extração em cascata (Fast HTTP + Playwright Stealth).
 """
 
 import asyncio
@@ -13,10 +14,10 @@ import random
 import re
 import time
 from typing import Dict, List, Optional, Tuple
+import unicodedata
 import urllib.parse
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
-import unicodedata
 
 from bs4 import BeautifulSoup
 import googlenewsdecoder
@@ -94,6 +95,7 @@ def normalizar_nome_tema(tema: str) -> str:
 
 
 def classificar_url_terminal(url: str) -> Optional[str]:
+    """Identifica URLs de redes fechadas, plataformas de mídia ou homepages."""
     if not url or not isinstance(url, str):
         return None
     try:
@@ -113,6 +115,7 @@ def classificar_url_terminal(url: str) -> Optional[str]:
 
 
 def validar_integridade_factual(titulo: str, texto: Optional[str]) -> Tuple[bool, str]:
+    """Valida densidade textual, bloqueios de infraestrutura e sobreposição léxica."""
     if not texto or len(texto.strip()) < TAMANHO_MINIMO_TEXTO:
         return False, "TEXTO_MUITO_CURTO"
 
@@ -134,6 +137,7 @@ def validar_integridade_factual(titulo: str, texto: Optional[str]) -> Tuple[bool
 
 
 def decode_token_offline(token: str) -> Optional[str]:
+    """Decodifica URLs base64 do Google News de forma local."""
     try:
         padded = token + "=" * (-len(token) % 4)
         raw_bytes = base64.urlsafe_b64decode(padded)
@@ -148,6 +152,7 @@ def decode_token_offline(token: str) -> Optional[str]:
 
 
 def resolve_publisher_url(google_news_url: str) -> str:
+    """Decodifica URL do Google News combinando rotina offline e decodificador v1."""
     if not google_news_url or "news.google.com" not in google_news_url:
         return google_news_url
 
@@ -171,6 +176,7 @@ def resolve_publisher_url(google_news_url: str) -> str:
 
 
 def build_rss_query(base_term: str, excluded_terms: list, preferred_domains: list) -> str:
+    """Monta a string de busca booleana para o RSS."""
     parts = [base_term]
     if preferred_domains:
         sites_query = " OR ".join([f"site:{domain}" for domain in preferred_domains])
@@ -181,6 +187,7 @@ def build_rss_query(base_term: str, excluded_terms: list, preferred_domains: lis
 
 
 def fetch_rss_feed(query: str, hl: str, gl: str, timeout: int = 6) -> list:
+    """Consulta o RSS do Google News retornando os itens estruturados."""
     encoded_query = urllib.parse.quote(query)
     ceid = f"{hl.upper()}:{gl.upper()}"
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl={hl}&gl={gl}&ceid={ceid}"
@@ -205,6 +212,7 @@ def fetch_rss_feed(query: str, hl: str, gl: str, timeout: int = 6) -> list:
 
 
 def scrape_article_text(url: str, timeout: int = 5) -> Tuple[Optional[str], str, str]:
+    """Extrai texto via requisição direta com fallback para BeautifulSoup."""
     real_url = resolve_publisher_url(url)
     if "news.google.com" in real_url:
         return None, "FALHA_DECODIFICACAO_URL", real_url
@@ -246,7 +254,7 @@ def cluster_articles_rapido(
     similarity_threshold: float = 80.0,
     prefixo_id: str = "CLUS",
 ) -> list:
-    """Deduplicação de alta velocidade via Levenshtein / Token Sort Ratio."""
+    """Deduplicação de alta velocidade via Token Sort Ratio (sem modelos neurais pesados)."""
     if not raw_articles:
         return []
 
@@ -289,12 +297,16 @@ def cluster_articles_rapido(
 
 
 def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
+    """
+    Estágio 1 (Fast HTTP): Itera por todos os links candidatas (primária + espelhos).
+    Salta links inadequados e interrompe imediatamente ao encontrar o primeiro viável.
+    """
     urls_to_try = [cluster["url_primaria"]]
     for esp in cluster.get("urls_espelho", []):
         if esp and esp not in urls_to_try:
             urls_to_try.append(esp)
 
-    historico = []
+    historico = list(cluster.get("historico_tentativas", []))
     espelhos_decodificados = [resolve_publisher_url(e) for e in cluster.get("urls_espelho", [])]
     titulo = cluster.get("titulo", "")
     primeira_url_resolvida = None
@@ -328,6 +340,7 @@ def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
             })
             continue
 
+        # Sucesso factual: interrompe o loop do cluster
         historico.append({
             "url_original_rss": link,
             "url_canonica_decodificada": final_url,
@@ -336,44 +349,32 @@ def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
             "timestamp": datetime.now(FUSO_BRASILIA).strftime("%Y-%m-%d %H:%M:%S"),
         })
 
-        return {
-            "id_cluster": cluster["id_cluster"],
-            "tema": cluster["tema"],
-            "termo_origem": cluster["termo_origem"],
-            "titulo": titulo,
-            "data_noticia": cluster["data_noticia"],
-            "idioma": cluster["idioma"],
-            "fonte_utilizada": cluster["fonte_principal"],
-            "url_utilizada": final_url,
-            "url_canonica_resolvida": final_url,
-            "urls_espelho_disponiveis": [u for u in espelhos_decodificados if u != final_url],
-            "status_extracao": "SUCESSO",
-            "texto_completo": texto,
-            "motivo_bloqueio": None,
-            "necessita_extracao_manual": False,
-            "historico_tentativas": historico,
-        }
+        cluster["url_utilizada"] = final_url
+        cluster["url_canonica_resolvida"] = final_url
+        cluster["urls_espelho_disponiveis"] = [u for u in espelhos_decodificados if u != final_url]
+        cluster["status_extracao"] = "SUCESSO"
+        cluster["texto_completo"] = texto
+        cluster["motivo_bloqueio"] = None
+        cluster["necessita_extracao_manual"] = False
+        cluster["historico_tentativas"] = historico
+        return cluster
 
-    return {
-        "id_cluster": cluster["id_cluster"],
-        "tema": cluster["tema"],
-        "termo_origem": cluster["termo_origem"],
-        "titulo": titulo,
-        "data_noticia": cluster["data_noticia"],
-        "idioma": cluster["idioma"],
-        "fonte_utilizada": cluster["fonte_principal"],
-        "url_utilizada": primeira_url_resolvida or cluster["url_primaria"],
-        "url_canonica_resolvida": primeira_url_resolvida or cluster["url_primaria"],
-        "urls_espelho_disponiveis": espelhos_decodificados,
-        "status_extracao": "CONTEUDO_BLOQUEADO",
-        "texto_completo": "",
-        "motivo_bloqueio": ultimo_motivo,
-        "necessita_extracao_manual": True,
-        "historico_tentativas": historico,
-    }
+    cluster["url_utilizada"] = primeira_url_resolvida or cluster["url_primaria"]
+    cluster["url_canonica_resolvida"] = primeira_url_resolvida or cluster["url_primaria"]
+    cluster["urls_espelho_disponiveis"] = espelhos_decodificados
+    cluster["status_extracao"] = "CONTEUDO_BLOQUEADO"
+    cluster["texto_completo"] = ""
+    cluster["motivo_bloqueio"] = ultimo_motivo
+    cluster["necessita_extracao_manual"] = True
+    cluster["historico_tentativas"] = historico
+    return cluster
 
 
 async def _navegar_playwright_item(context, item: dict) -> dict:
+    """
+    Estágio 2 (Playwright Stealth): Itera pelas candidatas em headless browser.
+    Salta URLs terminais ou com bloqueio factual e interrompe no primeiro sucesso.
+    """
     url_primaria = item.get("url_canonica_resolvida") or item.get("url_utilizada") or ""
     candidatas = [url_primaria] if url_primaria else []
     for esp in item.get("urls_espelho_disponiveis", []):
@@ -468,6 +469,7 @@ async def _navegar_playwright_item(context, item: dict) -> dict:
 
 
 async def processar_bloqueados_playwright(itens_bloqueados: list) -> list:
+    """Executa pool assíncrono restrito a 4 abas para resgate de matérias bloqueadas."""
     if not itens_bloqueados:
         return []
     async with async_playwright() as p:
@@ -494,7 +496,7 @@ async def processar_bloqueados_playwright(itens_bloqueados: list) -> list:
 
 
 def executar_fallback_playwright(itens_bloqueados: list) -> list:
-    """Interface síncrona padrão para acionamento do pool assíncrono do Playwright."""
+    """Interface síncrona padronizada para invocação do loop assíncrono do Playwright."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
