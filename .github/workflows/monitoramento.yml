@@ -37,6 +37,14 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py --shard ${{ matrix.shard }}
 
+      - name: Preservar JSON em Artifacts do GitHub
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: noticias-${{ matrix.shard }}
+          path: noticias_${{ matrix.shard }}_*.json
+          retention-days: 14
+
       - name: Limpar Credenciais Temporarias
         if: always()
         run: rm -f /tmp/gdrive_sa.json
