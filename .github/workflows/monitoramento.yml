@@ -2,9 +2,18 @@ name: Monitoramento de Mercado Multirregional
 
 on:
   schedule:
-    # Executa todos os dias às 06:00 UTC (03:00 Horário de Brasília)
+    # Execução diária regular às 06:00 UTC (03:00 Horário de Brasília)
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      inicio_mmaaaa:
+        description: 'Mês/Ano Inicial (MMAAAA - ex: 102021). Deixe vazio para diário.'
+        required: false
+        default: ''
+      fim_mmaaaa:
+        description: 'Mês/Ano Final (MMAAAA - ex: 092026). Deixe vazio para diário.'
+        required: false
+        default: ''
 
 env:
   TZ: "America/Sao_Paulo"
@@ -12,7 +21,7 @@ env:
 jobs: 
   executar-shard:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -52,16 +61,20 @@ jobs:
           playwright install-deps chromium
           sudo apt-get update && sudo apt-get install -y rclone
 
-      - name: Configurar Rclone em Memoria para Acesso ao Drive (Service Account)
+      - name: Configurar Rclone para Drive (Config e Dados Brutos)
         env:
           GDRIVE_SA_KEY_B64: ${{ secrets.GDRIVE_SA_KEY }}
           ID_CONFIGS: ${{ secrets.GDRIVE_CONFIG_FOLDER_ID }}
+          ID_DADOS_BRUTOS: ${{ secrets.GDRIVE_DADOS_BRUTOS_FOLDER_ID }}
         run: |
           echo "$GDRIVE_SA_KEY_B64" | base64 -d > /tmp/gdrive_sa.json
           python -c 'import json; json.load(open("/tmp/gdrive_sa.json"))'
 
           CLEAN_CONFIGS=$(echo "$ID_CONFIGS" | grep -oE '[a-zA-Z0-9_-]{25,}' | head -n 1)
           if [ -z "$CLEAN_CONFIGS" ]; then CLEAN_CONFIGS="$ID_CONFIGS"; fi
+
+          CLEAN_DADOS=$(echo "$ID_DADOS_BRUTOS" | grep -oE '[a-zA-Z0-9_-]{25,}' | head -n 1)
+          if [ -z "$CLEAN_DADOS" ]; then CLEAN_DADOS="$ID_DADOS_BRUTOS"; fi
 
           mkdir -p ~/.config/rclone
           cat <<EOF > ~/.config/rclone/rclone.conf
@@ -71,15 +84,37 @@ jobs:
           service_account_file = /tmp/gdrive_sa.json
           root_folder_id = $CLEAN_CONFIGS
           include_shared_with_me = true
+
+          [gdrive_dados]
+          type = drive
+          scope = drive
+          service_account_file = /tmp/gdrive_sa.json
+          root_folder_id = $CLEAN_DADOS
+          include_shared_with_me = true
           EOF
 
-          
       - name: Executar Pipeline do Shard [${{ matrix.shard }}]
         env:
           PYTHONUNBUFFERED: "1"
           SHARD_NAME: ${{ matrix.shard }}
-        run: python main.py --shard ${{ matrix.shard }}
-        
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          PARAMS="--shard ${{ matrix.shard }}"
+          if [ -n "${{ inputs.inicio_mmaaaa }}" ] && [ -n "${{ inputs.fim_mmaaaa }}" ]; then
+            PARAMS="$PARAMS --inicio_mmaaaa ${{ inputs.inicio_mmaaaa }} --fim_mmaaaa ${{ inputs.fim_mmaaaa }}"
+          fi
+          python main.py $PARAMS
+
+      - name: Sincronizacao de Contingencia para o Drive
+        if: always()
+        run: |
+          for f in noticias_${{ matrix.shard }}_*.json; do
+            if [ -f "$f" ]; then
+              rclone copyto "$f" "gdrive_dados:$(basename "$f")"
+            fi
+          done
+
       - name: Preservar JSON em Artifacts do GitHub
         if: always()
         uses: actions/upload-artifact@v4
@@ -92,27 +127,3 @@ jobs:
         if: always()
         run: |
           rm -rf /tmp/gdrive_sa.json ~/.config/rclone/rclone.conf
-
-      - name: Notificar falha via Telegram
-        if: failure()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SHARD_NAME: ${{ matrix.shard }}
-        run: |
-          python -c '
-          import os, requests
-          token = os.getenv("TELEGRAM_BOT_TOKEN")
-          shard = os.getenv("SHARD_NAME")
-          ids = [i.strip() for i in os.getenv("TELEGRAM_CHAT_ID", "").split(",") if i.strip()]
-          msg = f"🚨 <b>FALHA NO SHARD {shard.upper()}</b>\nA rotina diária encontrou um erro operacional."
-          for chat_id in ids:
-              try:
-                  requests.post(
-                      f"https://api.telegram.org/bot{token}/sendMessage",
-                      data={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"},
-                      timeout=30
-                  )
-              except Exception:
-                  pass
-          '
