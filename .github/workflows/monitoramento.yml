@@ -6,6 +6,9 @@ on:
     - cron: '0 6 * * *'
   workflow_dispatch:
 
+env:
+  TZ: "America/Sao_Paulo"
+
 jobs:
   executar-shard:
     runs-on: ubuntu-latest
