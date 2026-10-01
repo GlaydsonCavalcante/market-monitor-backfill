@@ -1,9 +1,10 @@
 """
 main.py
 
-Orquestrador do pipeline regional com injeção dinâmica em memória via Rclone,
-busca delimitada por intervalo MMAAAA (sem depender dos configs) e gravação
-direta no Google Drive corporativo.
+Orquestrador iterativo: processa tema por tema, mês por mês.
+Divide o mês em subjanelas semanais para mitigar o teto do Google News RSS,
+grava e envia cada arquivo diretamente para o Google Drive corporativo:
+noticias_raw_<AAAA>_<MM>_<tema>.json
 """
 
 import os
@@ -11,7 +12,6 @@ import sys
 import time
 from zoneinfo import ZoneInfo
 
-# Configuração prioritária do fuso horário de Brasília (UTC-3)
 os.environ["TZ"] = "America/Sao_Paulo"
 if hasattr(time, "tzset"):
     time.tzset()
@@ -21,7 +21,7 @@ FUSO_BRASILIA = ZoneInfo("America/Sao_Paulo")
 import argparse
 import calendar
 import concurrent.futures
-from datetime import datetime
+from datetime import datetime, timedelta
 import importlib.util
 import json
 import random
@@ -33,35 +33,52 @@ from notifier import enviar_telegram
 import processor
 
 
-def parse_mmaaaa(tag: str, is_end: bool = False) -> str:
-    """
-    Converte string no formato MMAAAA (ex: '102021') em data YYYY-MM-DD.
-    Se for fim de período, calcula o primeiro dia do mês subsequente para corte estrito no Google.
-    """
-    tag = tag.strip().replace("/", "").replace("-", "")
-    if len(tag) != 6 or not tag.isdigit():
-        raise ValueError(f"Formato inválido para MMAAAA: '{tag}'. Esperado 6 dígitos (ex: 102021).")
+def gerar_meses_entre(inicio_mmaaaa: str, fim_mmaaaa: str) -> list:
+    """Gera lista de tuplas (ano, mes) entre duas marcas MMAAAA inclusivas."""
+    ini = inicio_mmaaaa.strip().replace("/", "")
+    fim = fim_mmaaaa.strip().replace("/", "")
+    m_ini, a_ini = int(ini[:2]), int(ini[2:])
+    m_fim, a_fim = int(fim[:2]), int(fim[2:])
 
-    mes = int(tag[:2])
-    ano = int(tag[2:])
+    meses = []
+    dt_atual = datetime(a_ini, m_ini, 1)
+    dt_fim = datetime(a_fim, m_fim, 1)
 
-    if not (1 <= mes <= 12):
-        raise ValueError(f"Mês inválido: {mes}. Deve estar entre 01 e 12.")
+    while dt_atual <= dt_fim:
+        meses.append((dt_atual.year, dt_atual.month))
+        # Avança 1 mês
+        ultimo_dia = calendar.monthrange(dt_atual.year, dt_atual.month)[1]
+        dt_atual = dt_atual + timedelta(days=ultimo_dia)
+        dt_atual = dt_atual.replace(day=1)
 
-    if not is_end:
-        return f"{ano:04d}-{mes:02d}-01"
-    else:
-        if mes == 12:
-            return f"{ano + 1:04d}-01-01"
+    return meses
+
+
+def gerar_subjanelas_mes(ano: int, mes: int) -> list:
+    """Divide um mês em 4 janelas para contornar o teto de 100 itens do RSS."""
+    ultimo_dia = calendar.monthrange(ano, mes)[1]
+    cortes = [
+        (1, 7),
+        (8, 14),
+        (15, 21),
+        (22, ultimo_dia)
+    ]
+    janelas = []
+    for d_ini, d_fim in cortes:
+        dt_ini = f"{ano:04d}-{mes:02d}-{d_ini:02d}"
+        if d_fim == ultimo_dia:
+            # Próximo dia para before exclusivo
+            if mes == 12:
+                dt_fim = f"{ano+1:04d}-01-01"
+            else:
+                dt_fim = f"{ano:04d}-{mes+1:02d}-01"
         else:
-            return f"{ano:04d}-{mes + 1:02d}-01"
+            dt_fim = f"{ano:04d}-{mes:02d}-{d_fim+1:02d}"
+        janelas.append(f"after:{dt_ini} before:{dt_fim}")
+    return janelas
 
 
 def carregar_modulo_config(caminho_ou_shard: str):
-    """
-    Carrega a configuração dinamicamente na memória RAM via Rclone streaming
-    ou arquivo local, tolerando múltiplos encodings.
-    """
     if os.path.exists(caminho_ou_shard):
         spec = importlib.util.spec_from_file_location("config_modulo", caminho_ou_shard)
         modulo = importlib.util.module_from_spec(spec)
@@ -75,214 +92,142 @@ def carregar_modulo_config(caminho_ou_shard: str):
         else caminho_ou_shard
     )
     comando = ["rclone", "cat", f"gdrive_config:{nome_arquivo}"]
-
     proc = subprocess.run(comando, capture_output=True)
     if proc.returncode != 0:
         erro_msg = proc.stderr.decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"Falha ao ler {nome_arquivo} do Google Drive via Rclone.\nDetalhes: {erro_msg}"
-        )
+        raise RuntimeError(f"Falha ao ler {nome_arquivo} do Google Drive: {erro_msg}")
 
-    conteudo_codigo = None
+    conteudo = None
     for enc in ["utf-8-sig", "utf-8", "utf-16", "latin-1"]:
         try:
-            conteudo_codigo = proc.stdout.decode(enc)
+            conteudo = proc.stdout.decode(enc)
             break
         except UnicodeDecodeError:
             continue
 
-    if conteudo_codigo is None:
-        raise ValueError(f"Não foi possível decodificar o arquivo {nome_arquivo}.")
+    if conteudo is None:
+        raise ValueError(f"Não foi possível decodificar {nome_arquivo}.")
 
     modulo = types.ModuleType("config_modulo")
     modulo.__file__ = f"<gdrive_config:{nome_arquivo}>"
     sys.modules["config_modulo"] = modulo
-    exec(conteudo_codigo, modulo.__dict__)
-
+    exec(conteudo, modulo.__dict__)
     return modulo
-
-
-def registrar_step_summary(regiao: str, total_brutas: int, total_clusters: int, sucessos: int, bloqueados: int) -> None:
-    caminho_summary = os.getenv("GITHUB_STEP_SUMMARY")
-    if not caminho_summary:
-        return
-
-    taxa = (sucessos / (sucessos + bloqueados) * 100) if (sucessos + bloqueados) > 0 else 0.0
-    agora = datetime.now(FUSO_BRASILIA).strftime("%d/%m/%Y %H:%M:%S")
-
-    markdown = (
-        f"### 📊 Monitoramento Regional: {regiao.upper()}\n\n"
-        f"**Data/Hora Execução:** {agora} (Horário de Brasília)\n\n"
-        f"| Métrica | Valor |\n"
-        f"| :--- | :--- |\n"
-        f"| Matérias Brutas Coletadas | {total_brutas} |\n"
-        f"| Clusters Consolidados | {total_clusters} |\n"
-        f"| Textos Extraídos com Sucesso | {sucessos} |\n"
-        f"| Bloqueadas / Falhas | {bloqueados} |\n"
-        f"| Taxa de Eficácia | {taxa:.1f}% |\n\n"
-        f"---\n"
-    )
-
-    with open(caminho_summary, "a", encoding="utf-8") as f:
-        f.write(markdown)
 
 
 def executar_pipeline(caminho_ou_shard: str, inicio_mmaaaa: str = None, fim_mmaaaa: str = None) -> None:
     cfg = carregar_modulo_config(caminho_ou_shard)
     regiao = getattr(cfg, "REGIAO_NOME", "GLOBAL").lower()
-    agora_bsb = datetime.now(FUSO_BRASILIA)
-    ts = agora_bsb.strftime("%Y%m%d_%H%M%S")
 
-    # Determinação do filtro temporal absoluto
+    # 1. Definição do escopo temporal
     if inicio_mmaaaa and fim_mmaaaa:
-        d_after = parse_mmaaaa(inicio_mmaaaa, is_end=False)
-        d_before = parse_mmaaaa(fim_mmaaaa, is_end=True)
-        filtro_data = f"after:{d_after} before:{d_before}"
-        rotulo_periodo = f"{inicio_mmaaaa}_{fim_mmaaaa}"
+        meses_alvo = gerar_meses_entre(inicio_mmaaaa, fim_mmaaaa)
     else:
-        filtro_data = "when:1d"
-        rotulo_periodo = ts
+        # Se não informado, executa o mês corrente
+        agora = datetime.now(FUSO_BRASILIA)
+        meses_alvo = [(agora.year, agora.month)]
 
-    nome_json = f"noticias_{regiao}_{rotulo_periodo}.json"
+    print(f"\n=======================================================", flush=True)
+    print(f"SHARD: [{regiao.upper()}] | MESES: {len(meses_alvo)} no escopo", flush=True)
+    print(f"=======================================================\n", flush=True)
 
-    raw_articles = []
-    print(
-        f"Iniciando varredura [{regiao.upper()}] | Janela: {filtro_data} | Fuso: Brasília...",
-        flush=True,
-    )
-
-    # 1. Varredura RSS direcionada por mercado e idioma
-    for tema, dict_idiomas in cfg.MONITORAMENTOS.items():
-        print(f">> Tema: {tema}", flush=True)
-        for mercado in cfg.MERCADOS_ALVO:
-            gl = mercado["gl"]
-            hl = mercado["hl"]
-            lang = mercado["lang"]
-
-            termos = dict_idiomas.get(lang, [])
-            termos_excluidos = getattr(cfg, "TERMOS_EXCLUIDOS", {}).get(lang, [])
-            dominios = getattr(cfg, "DOMINIOS_PREFERENCIAIS", [])
-            timeout_req = getattr(cfg, "TIMEOUT_REQUISICAO", 6)
-
-            for termo in termos:
-                # Constrói query explicitamente com o filtro after/before ou when:1d
-                query = processor.build_rss_query(
-                    base_term=termo,
-                    excluded_terms=termos_excluidos,
-                    period=None,  # Desativa o parâmetro antigo
-                    preferred_domains=dominios,
-                )
-                query_final = f"{query} {filtro_data}".strip()
-
-                itens = processor.fetch_rss_feed(
-                    query_final, hl=hl, gl=gl, timeout=timeout_req
-                )
-                for item in itens:
-                    item["tema"] = tema
-                    item["termo_origem"] = termo
-                    item["pais_emissao"] = gl
-                    item["idioma"] = hl
-                    raw_articles.append(item)
-
-    print(f"Total bruto coletado: {len(raw_articles)} matérias.", flush=True)
-
-    # 2. Agrupamento Semântico
-    clusters = processor.cluster_articles(
-        raw_articles,
-        model_name=getattr(cfg, "MODELO_EMBEDDING_1024", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
-        similarity_threshold=getattr(cfg, "SIMILARIDADE_REDUNDANCIA", 0.73),
-        regiao_prefix=regiao,
-    )
-    print(f"Clusters consolidados: {len(clusters)}", flush=True)
-
-    # 3. Extração Concorrente de Rede com Autocura (Cascata Primária + Espelhos)
+    mercados = cfg.MERCADOS_ALVO
     timeout_req = getattr(cfg, "TIMEOUT_REQUISICAO", 6)
-
-    def worker(cluster_item):
-        time.sleep(random.uniform(0.1, 0.3))
-        return processor.process_cluster_with_fallback(cluster_item, timeout=timeout_req)
-
-    processed_results = []
     max_workers = getattr(cfg, "MAX_WORKERS_PARALELO", 8)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futuros = {executor.submit(worker, c): c for c in clusters}
-        for futuro in concurrent.futures.as_completed(futuros):
-            res = futuro.result()
-            processed_results.append(res)
+    dominios = getattr(cfg, "DOMINIOS_PREFERENCIAIS", [])
 
-    sucessos_estagio1 = sum(1 for r in processed_results if r["status_extracao"] == "SUCESSO")
-    print(f">> Estágio 1 (HTTP) concluído: {sucessos_estagio1}/{len(clusters)} extraídos com sucesso.", flush=True)
+    total_geral_extraidas = 0
 
-    # 3.2 Estágio 2: Headless Browser Playwright Stealth
-    bloqueados_indices = [i for i, r in enumerate(processed_results) if r["status_extracao"] != "SUCESSO"]
-    if bloqueados_indices:
-        print(f">> Estágio 2: Ativando Playwright Stealth para {len(bloqueados_indices)} matérias...", flush=True)
-        itens_para_pw = [processed_results[i] for i in bloqueados_indices]
-        itens_recuperados = processor.executar_fallback_playwright(itens_para_pw)
+    # 2. Laço Mês a Mês
+    for ano, mes in meses_alvo:
+        subjanelas = gerar_subjanelas_mes(ano, mes)
+        tag_mes = f"{ano:04d}_{mes:02d}"
 
-        for pos, idx_original in enumerate(bloqueados_indices):
-            processed_results[idx_original] = itens_recuperados[pos]
+        # 3. Laço Tema a Tema dentro do Mês
+        for tema, dict_idiomas in cfg.MONITORAMENTOS.items():
+            tema_slug = processor.normalizar_nome_tema(tema)
+            nome_arquivo_drive = f"noticias_raw_{tag_mes}_{tema_slug}.json"
 
-    for i, res in enumerate(processed_results, 1):
-        status_ico = "✅" if res["status_extracao"] == "SUCESSO" else "🔒"
-        print(f"[{i}/{len(clusters)}] {status_ico} {res['titulo'][:60]}...", flush=True)
+            print(f"\n>> Processando: {nome_arquivo_drive}...", flush=True)
+            raw_artigos_tema = []
 
-    # 4. Gravação local provisória
-    json_formatado = json.dumps(processed_results, ensure_ascii=False, indent=2)
-    with open(nome_json, "w", encoding="utf-8") as f:
-        f.write(json_formatado)
+            # 4. Fatiamento em 4 subjanelas para mitigar teto do RSS
+            for filtro_janela in subjanelas:
+                for mercado in mercados:
+                    gl = mercado["gl"]
+                    hl = mercado["hl"]
+                    lang = mercado["lang"]
 
-    # 5. Cópia imediata para o Google Drive corporativo (dados brutos)
-    print(f">> Transmitindo {nome_json} para Google Drive (dados brutos)...", flush=True)
-    res_drive = subprocess.run(["rclone", "copyto", nome_json, f"gdrive_dados:{nome_json}"], capture_output=True)
-    if res_drive.returncode == 0:
-        print(f"✓ Arquivo {nome_json} gravado com sucesso no Google Drive.", flush=True)
-    else:
-        print(f"⚠️ Alerta: Falha ao gravar no Drive via Python: {res_drive.stderr.decode('utf-8', errors='replace')}", flush=True)
+                    termos = dict_idiomas.get(lang, [])
+                    excluidos = getattr(cfg, "TERMOS_EXCLUIDOS", {}).get(lang, [])
 
-    sucessos = sum(1 for r in processed_results if r["status_extracao"] == "SUCESSO")
-    bloqueados = len(processed_results) - sucessos
+                    for termo in termos:
+                        query_base = processor.build_rss_query(termo, excluidos, dominios)
+                        query_final = f"{query_base} {filtro_janela}".strip()
 
-    # 6. Telemetria
-    taxa_sucesso = (sucessos / len(processed_results) * 100) if processed_results else 0.0
-    print("\n" + "=" * 60, flush=True)
-    print(f"RELATÓRIO CONSOLIDADO: [{regiao.upper()}]", flush=True)
-    print(f"Matérias Brutas : {len(raw_articles)}", flush=True)
-    print(f"Clusters        : {len(clusters)}", flush=True)
-    print(f"Sucessos        : {sucessos} ({taxa_sucesso:.1f}%)", flush=True)
-    print(f"Bloqueios       : {bloqueados}", flush=True)
-    print("=" * 60 + "\n", flush=True)
+                        itens = processor.fetch_rss_feed(query_final, hl=hl, gl=gl, timeout=timeout_req)
+                        for item in itens:
+                            item["tema"] = tema
+                            item["termo_origem"] = termo
+                            item["pais_emissao"] = gl
+                            item["idioma"] = hl
+                            raw_artigos_tema.append(item)
 
-    registrar_step_summary(
-        regiao=regiao,
-        total_brutas=len(raw_articles),
-        total_clusters=len(clusters),
-        sucessos=sucessos,
-        bloqueados=bloqueados,
-    )
+            if not raw_artigos_tema:
+                print(f"   Nenhuma matéria encontrada para {tema} em {tag_mes}.", flush=True)
+                continue
 
-    enviar_telegram(
-        regiao_nome=regiao,
-        arquivos=[nome_json],
-        total_brutas=len(raw_articles),
-        total_clusters=len(clusters),
-        total_processadas=len(processed_results),
-        sucessos=sucessos,
-        bloqueados=bloqueados,
-    )
+            # 5. Agrupamento Semântico Leve (rapidfuzz, sem BGE-M3)
+            prefixo = f"CLUS_{tag_mes}_{tema_slug[:4].upper()}"
+            clusters = processor.cluster_articles_rapido(raw_artigos_tema, similarity_threshold=80.0, prefixo_id=prefixo)
+
+            # 6. Raspagem Concorrente (HTTP + Playwright Stealth em Cascata)
+            def worker(c):
+                time.sleep(random.uniform(0.05, 0.2))
+                return processor.process_cluster_with_fallback(c, timeout=timeout_req)
+
+            processed_results = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futuros = {executor.submit(worker, c): c for c in clusters}
+                for f in concurrent.futures.as_completed(futuros):
+                    processed_results.append(f.result())
+
+            bloqueados = [i for i, r in enumerate(processed_results) if r["status_extracao"] != "SUCESSO"]
+            if bloqueados:
+                itens_pw = [processed_results[i] for i in bloqueados]
+                recuperados = processor.executar_fallback_playwright(itens_pw)
+                for pos, idx_orig in enumerate(bloqueados):
+                    processed_results[idx_orig] = recuperados[pos]
+
+            sucessos = sum(1 for r in processed_results if r["status_extracao"] == "SUCESSO")
+            total_geral_extraidas += sucessos
+            print(f"   Resultado: {sucessos}/{len(clusters)} textos extraídos com sucesso.", flush=True)
+
+            # 7. Gravação Local e Envio Imediato ao Google Drive (dados brutos)
+            with open(nome_arquivo_drive, "w", encoding="utf-8") as f:
+                json.dump(processed_results, f, ensure_ascii=False, indent=2)
+
+            res = subprocess.run(["rclone", "copyto", nome_arquivo_drive, f"gdrive_dados:{nome_arquivo_drive}"], capture_output=True)
+            if res.returncode == 0:
+                print(f"   ✓ Sincronizado no Google Drive: {nome_arquivo_drive}", flush=True)
+                os.remove(nome_arquivo_drive)  # Libera espaço em disco no runner
+            else:
+                print(f"   ⚠️ Falha na sincronização com o Drive: {res.stderr.decode('utf-8', errors='replace')}", flush=True)
+
+    print(f"\nFinalizada a execução do Shard [{regiao.upper()}]. Total de textos extraídos: {total_geral_extraidas}\n", flush=True)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Orquestrador de Monitoramento Regional")
-    parser.add_argument("--config", type=str, default=None, help="Caminho do arquivo local")
-    parser.add_argument("--shard", type=str, default=None, help="Nome do shard no Google Drive")
-    parser.add_argument("--inicio_mmaaaa", type=str, default=None, help="Mês/Ano inicial (ex: 102021)")
-    parser.add_argument("--fim_mmaaaa", type=str, default=None, help="Mês/Ano final (ex: 092026)")
+    parser = argparse.ArgumentParser(description="Orquestrador Histórico por Shard")
+    parser.add_argument("--config", type=str, default=None)
+    parser.add_argument("--shard", type=str, default=None)
+    parser.add_argument("--inicio_mmaaaa", type=str, default=None, help="Ex: 102021")
+    parser.add_argument("--fim_mmaaaa", type=str, default=None, help="Ex: 092026")
     args = parser.parse_args()
 
     alvo = args.shard if args.shard else args.config
     if not alvo:
-        raise ValueError("É necessário informar --shard ou --config.")
+        raise ValueError("Informe --shard ou --config.")
 
     executar_pipeline(
         caminho_ou_shard=alvo,
