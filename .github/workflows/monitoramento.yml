@@ -14,9 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
-      fail-fast: false # Garante que a falha de um shard NÃO cancela os demais
+      fail-fast: false
       matrix:
-        # Lista com todos os novos configs criados
         shard:
           - latam_fintechs
           - latam_plataformas
@@ -33,7 +32,6 @@ jobs:
       - name: Baixar codigo do repositorio
         uses: actions/checkout@v4
 
-      # Mantido: previne estouro de armazenamento no ambiente do runner
       - name: Liberar espaco em disco no Runner
         run: |
           sudo rm -rf /usr/share/dotnet
@@ -46,33 +44,57 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      # Mantido/Comentado: pronto para reativação caso volte a vetorizar com BGE-M3 no GitHub
-      # - name: Cache do Modelo BGE-M3
-      #   uses: actions/cache@v4
-      #   with:
-      #     path: ~/.cache/huggingface
-      #     key: ${{ runner.os }}-hf-bge-m3
-
       - name: Instalar dependencias e Navegador Headless
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           playwright install chromium
           playwright install-deps chromium
+          sudo apt-get update && sudo apt-get install -y rclone
+
+      - name: Configurar Rclone para Download Seguro de Configs
+        env:
+          GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
+          ID_CONFIGS: ${{ secrets.GDRIVE_CONFIG_FOLDER_ID }}
+        run: |
+          echo "$GDRIVE_SA_KEY" > /tmp/gdrive_sa.json
+          CLEAN_CONFIGS=$(echo "$ID_CONFIGS" | grep -oE '[a-zA-Z0-9_-]{25,}' | head -n 1)
+          if [ -z "$CLEAN_CONFIGS" ]; then CLEAN_CONFIGS="$ID_CONFIGS"; fi
+
+          mkdir -p ~/.config/rclone
+          cat <<EOF > ~/.config/rclone/rclone.conf
+          [gdrive_config]
+          type = drive
+          scope = drive
+          service_account_file = /tmp/gdrive_sa.json
+          root_folder_id = $CLEAN_CONFIGS
+          include_shared_with_me = true
+          EOF
+
+      - name: Baixar Arquivos de Configuracao Protegidos
+        run: |
+          mkdir -p configs
+          rclone copy gdrive_config: configs/ --include "config_*.py"
+          ls -la configs/
 
       - name: Executar Pipeline do Shard [${{ matrix.shard }}]
         env:
           PYTHONUNBUFFERED: "1"
           SHARD_NAME: ${{ matrix.shard }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: "405898240,5401165820,8998554084"
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py --config configs/config_${{ matrix.shard }}.py
+
+      - name: Limpar Credenciais Temporarias
+        if: always()
+        run: |
+          rm -rf /tmp/gdrive_sa.json configs/
 
       - name: Notificar falha via Telegram
         if: failure()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: "405898240,5401165820,8998554084"
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SHARD_NAME: ${{ matrix.shard }}
         run: |
           python -c '
@@ -80,7 +102,7 @@ jobs:
           token = os.getenv("TELEGRAM_BOT_TOKEN")
           shard = os.getenv("SHARD_NAME")
           ids = [i.strip() for i in os.getenv("TELEGRAM_CHAT_ID", "").split(",") if i.strip()]
-          msg = f"🚨 <b>FALHA NO SHARD {shard.upper()}</b>\nA rotina encontrou um erro crítico. Os demais shards continuam em execução."
+          msg = f"🚨 <b>FALHA NO SHARD {shard.upper()}</b>\nA rotina diária encontrou um erro operacional."
           for chat_id in ids:
               try:
                   requests.post(
