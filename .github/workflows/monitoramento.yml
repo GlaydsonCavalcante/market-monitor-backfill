@@ -29,25 +29,8 @@ jobs:
           - mea_india
 
     steps:
-      - name: Executar Pipeline do Shard [${{ matrix.shard }}]
-        env:
-          PYTHONUNBUFFERED: "1"
-          SHARD_NAME: ${{ matrix.shard }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python main.py --shard ${{ matrix.shard }}
-
-      - name: Preservar JSON em Artifacts do GitHub
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: noticias-${{ matrix.shard }}
-          path: noticias_${{ matrix.shard }}_*.json
-          retention-days: 14
-
-      - name: Limpar Credenciais Temporarias
-        if: always()
-        run: rm -f /tmp/gdrive_sa.json
+      - name: Baixar codigo do repositorio
+        uses: actions/checkout@v4
 
       - name: Liberar espaco em disco no Runner
         run: |
@@ -69,7 +52,7 @@ jobs:
           playwright install-deps chromium
           sudo apt-get update && sudo apt-get install -y rclone
 
-      - name: Configurar Rclone para Download Seguro de Configs
+      - name: Configurar Rclone em Memoria para Acesso ao Drive
         env:
           GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
           ID_CONFIGS: ${{ secrets.GDRIVE_CONFIG_FOLDER_ID }}
@@ -88,24 +71,26 @@ jobs:
           include_shared_with_me = true
           EOF
 
-      - name: Baixar Arquivos de Configuracao Protegidos
-        run: |
-          mkdir -p configs
-          rclone copy gdrive_config: configs/ --include "config_*.py"
-          ls -la configs/
-
       - name: Executar Pipeline do Shard [${{ matrix.shard }}]
         env:
           PYTHONUNBUFFERED: "1"
           SHARD_NAME: ${{ matrix.shard }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python main.py --config configs/config_${{ matrix.shard }}.py
+        run: python main.py --shard ${{ matrix.shard }}
 
-      - name: Limpar Credenciais Temporarias
+      - name: Preservar JSON em Artifacts do GitHub
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: noticias-${{ matrix.shard }}
+          path: noticias_${{ matrix.shard }}_*.json
+          retention-days: 14
+
+      - name: Expurgo de Credenciais Temporarias
         if: always()
         run: |
-          rm -rf /tmp/gdrive_sa.json configs/
+          rm -rf /tmp/gdrive_sa.json ~/.config/rclone/rclone.conf
 
       - name: Notificar falha via Telegram
         if: failure()
