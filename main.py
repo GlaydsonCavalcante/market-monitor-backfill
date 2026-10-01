@@ -219,6 +219,17 @@ def executar_pipeline(caminho_ou_shard: str) -> None:
         bloqueados=bloqueados,
     )
 
+    # Adicione esta linha se quiser o arquivo JSON e o relatório no Telegram ao fim de cada shard:
+    enviar_telegram(
+        regiao_nome=regiao,
+        arquivos=[nome_json],
+        total_brutas=len(raw_articles),
+        total_clusters=len(clusters),
+        total_processadas=len(processed_results),
+        sucessos=sucessos,
+        bloqueados=bloqueados,
+    )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Orquestrador de Monitoramento Regional")
