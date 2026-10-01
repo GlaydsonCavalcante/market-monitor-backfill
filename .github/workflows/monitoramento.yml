@@ -109,7 +109,7 @@ jobs:
       - name: Sincronizacao de Contingencia para o Drive
         if: always()
         run: |
-          for f in noticias_${{ matrix.shard }}_*.json; do
+          for f in noticias_raw_*.json; do
             if [ -f "$f" ]; then
               rclone copyto "$f" "gdrive_dados:$(basename "$f")"
             fi
@@ -119,8 +119,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: noticias-${{ matrix.shard }}
-          path: noticias_${{ matrix.shard }}_*.json
+          name: dados-brutos-${{ matrix.shard }}
+          path: noticias_raw_*.json
           retention-days: 14
 
       - name: Expurgo de Credenciais Temporarias
