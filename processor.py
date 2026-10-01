@@ -266,7 +266,12 @@ def scrape_article_text(url: str, timeout: int = 5) -> Tuple[Optional[str], str,
     return (text.strip() if text else None), "SUCESSO", resp.url
 
 
-def cluster_articles(raw_articles: list, model_name: str = "BAAI/bge-m3", similarity_threshold: float = 0.73) -> list:
+def cluster_articles(
+    raw_articles: list,
+    model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    similarity_threshold: float = 0.73,
+    regiao_prefix: str = "GLOB",
+) -> list:
     """Agrupa matérias semelhantes gerando clusters de notícia com lista de espelhos."""
     if not raw_articles:
         return []
@@ -293,8 +298,9 @@ def cluster_articles(raw_articles: list, model_name: str = "BAAI/bge-m3", simila
 
         primary = cluster_members[0]
         mirrors = [m["link"] for m in cluster_members[1:] if m["link"] != primary["link"]]
+        shard_tag = re.sub(r"[^\w]", "", regiao_prefix).upper()[:4]
         clusters.append({
-            "id_cluster": f"CLUS_{datetime.now().strftime('%Y%m%d')}_{len(clusters) + 1:04d}",
+            "id_cluster": f"CLUS_{datetime.now().strftime('%Y%m%d')}_{shard_tag}_{len(clusters) + 1:04d}",
             "tema": primary["tema"],
             "termo_origem": primary["termo_origem"],
             "titulo": primary["titulo"],
