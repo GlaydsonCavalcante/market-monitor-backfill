@@ -1,5 +1,14 @@
 """Orquestrador do pipeline com injeção dinâmica de configuração regional."""
 
+import time
+from zoneinfo import ZoneInfo
+
+os.environ["TZ"] = "America/Sao_Paulo"
+if hasattr(time, "tzset"):
+    time.tzset()
+
+FUSO_BRASILIA = ZoneInfo("America/Sao_Paulo")
+
 import argparse
 import concurrent.futures
 from datetime import datetime
@@ -9,7 +18,6 @@ import os
 import random
 import re
 import sys
-import time
 from notifier import enviar_telegram
 import pandas as pd
 import processor
@@ -72,7 +80,7 @@ def executar_pipeline(caminho_config: str) -> None:
 
   print(f"Total bruto coletado: {len(raw_articles)} matérias.", flush=True)
 
-  # 2. Agrupamento Semântico no dia com BGE-M3
+  # 2. Agrupamento Semântico no dia com prefixo regional para unicidade relacional
   clusters = processor.cluster_articles(
       raw_articles,
       model_name=cfg.MODELO_EMBEDDING_1024,
@@ -80,7 +88,7 @@ def executar_pipeline(caminho_config: str) -> None:
       regiao_prefix=regiao,
   )
   print(f"Clusters consolidados: {len(clusters)}", flush=True)
-
+  
   # 3. Extração Concorrente de Rede
   def worker(cluster_item):
     time.sleep(random.uniform(0.1, 0.3))
@@ -152,9 +160,7 @@ def executar_pipeline(caminho_config: str) -> None:
   # df_excel = pd.DataFrame(linhas_excel)
   # df_excel.to_excel(nome_excel, index=False, engine="openpyxl")
 
-  sucessos = sum(
-      1 for r in processed_results if r["status_extracao"] == "SUCESSO"
-  )
+  sucessos = sum(1 for r in processed_results if r["status_extracao"] == "SUCESSO")
   bloqueados = len(processed_results) - sucessos
 
   # 6. Despacho Telegram
