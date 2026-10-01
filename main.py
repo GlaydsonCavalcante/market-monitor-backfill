@@ -5,26 +5,27 @@ Orquestrador do pipeline de monitoramento diário com injeção dinâmica em mem
 de configurações protegidas via Google Drive/Rclone e carimbo temporal de Brasília.
 """
 
-import argparse
-import concurrent.futures
-from datetime import datetime
-import importlib.util
-import json
 import os
-import random
-import re
-import subprocess
 import sys
 import time
-import types
 from zoneinfo import ZoneInfo
 
-# 1. Configuração prioritária do fuso horário de Brasília (UTC-3)
+# Configuração prioritária do fuso horário de Brasília (UTC-3)
 os.environ["TZ"] = "America/Sao_Paulo"
 if hasattr(time, "tzset"):
     time.tzset()
 
 FUSO_BRASILIA = ZoneInfo("America/Sao_Paulo")
+
+import argparse
+import concurrent.futures
+from datetime import datetime
+import importlib.util
+import json
+import random
+import re
+import subprocess
+import types
 
 from notifier import enviar_telegram
 import processor
