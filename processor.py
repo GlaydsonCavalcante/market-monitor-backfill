@@ -497,7 +497,7 @@ async def _navegar_playwright_item(context, item: dict) -> dict:
 
         await page.route("**/*", interceptar_recursos)
 
-        for url_alvo in candidatas:
+        for url_alvo in candidatas: 
             cat_term = classificar_url_terminal(url_alvo)
             if cat_term:
                 ultimo_motivo = cat_term
