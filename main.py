@@ -185,13 +185,19 @@ def executar_fase_a_descoberta(cfg, regiao: str, meses_alvo: list, mapa_drive: d
                         "data_noticia": c["data_noticia"],
                         "idioma": c["idioma"],
                         "fonte_utilizada": c["fonte_principal"],
+                        "url_utilizada": c["url_primaria"],
                         "url_primaria": c["url_primaria"],
                         "urls_espelho": c["urls_espelho"],
+                        "urls_espelho_disponiveis": c["urls_espelho"],
+                        "urls_espelho_canonicas": [],
+                        "url_canonica_resolvida": None,
+                        "status_resolucao": "PENDENTE",
                         "status_extracao": "PENDENTE",
                         "texto_completo": "",
                         "motivo_bloqueio": None,
                         "necessita_extracao_manual": False,
-                        "historico_tentativas": []
+                        "historico_tentativas": [],
+                        "vetor_1024": None
                     })
 
             with open(nome_arquivo, "w", encoding="utf-8") as f:
