@@ -75,7 +75,6 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
           SHARD_NAME: ${{ matrix.shard }}
-          GITHUB_STEP_SUMMARY: ${{ env.GITHUB_STEP_SUMMARY }}
         run: python main.py --shard ${{ matrix.shard }}
         
       - name: Preservar JSON em Artifacts do GitHub
