@@ -287,7 +287,8 @@ def cluster_articles(
     visited = set()
     total = len(raw_articles)
     data_tag = datetime.now(FUSO_BRASILIA).strftime("%Y%m%d")
-    shard_tag = re.sub(r"[^\w]", "", regiao_prefix).upper()[:4]
+    # Utiliza o nome completo higienizado da região para eliminar risco de colisão de PK
+    shard_tag = re.sub(r"[^\w]", "_", regiao_prefix).upper().strip("_")
 
     for i in range(total):
         if i in visited:
