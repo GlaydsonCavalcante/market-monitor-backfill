@@ -21,19 +21,34 @@ import sys
 from notifier import enviar_telegram
 import pandas as pd
 import processor
+import subprocess
+import types
 
-def carregar_modulo_config(caminho_config: str):
-  """Carrega dinamicamente o arquivo de configuração passado por argumento."""
-  if not os.path.exists(caminho_config):
-    raise FileNotFoundError(
-        f"Arquivo de configuração não encontrado: {caminho_config}"
-    )
-  spec = importlib.util.spec_from_file_location("config_modulo", caminho_config)
-  modulo = importlib.util.module_from_spec(spec)
-  sys.modules["config_modulo"] = modulo
-  spec.loader.exec_module(modulo)
-  return modulo
+def carregar_modulo_config(caminho_ou_shard: str):
+    """
+    Carrega configuração em memória RAM.
+    Se for um caminho de arquivo local existente, lê do disco.
+    Se for um identificador de shard, faz streaming direto do Google Drive via Rclone sem criar arquivos locais.
+    """
+    if os.path.exists(caminho_ou_shard):
+        spec = importlib.util.spec_from_file_location("config_modulo", caminho_ou_shard)
+        modulo = importlib.util.module_from_spec(spec)
+        sys.modules["config_modulo"] = modulo
+        spec.loader.exec_module(modulo)
+        return modulo
 
+    # Streaming em memória diretamente do Google Drive via Rclone
+    nome_arquivo = f"config_{caminho_ou_shard}.py" if not caminho_ou_shard.endswith(".py") else caminho_ou_shard
+    comando = ["rclone", "cat", f"gdrive_config:{nome_arquivo}"]
+    
+    proc = subprocess.run(comando, capture_output=True, text=True, check=True)
+    
+    modulo = types.ModuleType("config_modulo")
+    modulo.__file__ = f"<gdrive_config:{nome_arquivo}>"
+    sys.modules["config_modulo"] = modulo
+    exec(proc.stdout, modulo.__dict__)
+    
+    return modulo
 
 def executar_pipeline(caminho_config: str) -> None:
   cfg = carregar_modulo_config(caminho_config)
@@ -176,15 +191,23 @@ def executar_pipeline(caminho_config: str) -> None:
 
 
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser(
-      description="Orquestrador de Monitoramento Regional"
-  )
-  parser.add_argument(
-      "--config",
-      type=str,
-      default="configs/config_latam.py",
-      help="Caminho do arquivo de configuração regional",
-  )
-  args = parser.parse_args()
+    parser = argparse.ArgumentParser(description="Orquestrador de Monitoramento Regional")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Caminho do arquivo de configuração local",
+    )
+    parser.add_argument(
+        "--shard",
+        type=str,
+        default=None,
+        help="Nome do shard para carregar diretamente do Google Drive em memória",
+    )
+    args = parser.parse_args()
 
-  executar_pipeline(args.config)
+    alvo = args.shard if args.shard else args.config
+    if not alvo:
+        raise ValueError("É necessário informar --shard ou --config.")
+
+    executar_pipeline(alvo)
