@@ -351,6 +351,8 @@ def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
         cluster["url_utilizada"] = final_url
         cluster["url_canonica_resolvida"] = final_url
         cluster["urls_espelho_disponiveis"] = [u for u in espelhos_decodificados if u != final_url]
+        cluster["urls_espelho_canonicas"] = [u for u in espelhos_decodificados if u != final_url and "news.google.com" not in u]
+        cluster["status_resolucao"] = "RESOLVIDO"
         cluster["status_extracao"] = "SUCESSO"
         cluster["texto_completo"] = texto
         cluster["motivo_bloqueio"] = None
@@ -361,6 +363,8 @@ def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
     cluster["url_utilizada"] = primeira_url_resolvida or cluster["url_primaria"]
     cluster["url_canonica_resolvida"] = primeira_url_resolvida or cluster["url_primaria"]
     cluster["urls_espelho_disponiveis"] = espelhos_decodificados
+    cluster["urls_espelho_canonicas"] = [u for u in espelhos_decodificados if "news.google.com" not in u]
+    cluster["status_resolucao"] = "FALHA"
     cluster["status_extracao"] = "CONTEUDO_BLOQUEADO"
     cluster["texto_completo"] = ""
     cluster["motivo_bloqueio"] = ultimo_motivo
