@@ -28,7 +28,7 @@ jobs:
   # =========================================================================
   fase-a-descoberta:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
     if: ${{ inputs.fase == 'todas' || inputs.fase == 'a' || inputs.fase == '' || github.event_name == 'schedule' }}
     strategy:
       fail-fast: false
