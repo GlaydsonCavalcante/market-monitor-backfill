@@ -73,6 +73,11 @@ PADROES_ANTIBOT = [
     r"accès\s+refusé",
     r"zugriff\s+verweigert",
     r"página\s+não\s+encontrada",
+    r"let us know you'?re not a robot",
+    r"click the box below to let us know",
+    r"supports javascript and cookies",
+    r"bloomberg\.com subscription",
+    r"why did this happen\?.*captcha",
 ]
 REGEX_ANTIBOT = re.compile("|".join(PADROES_ANTIBOT), re.IGNORECASE)
 
@@ -114,7 +119,7 @@ def classificar_url_terminal(url: str) -> Optional[str]:
 
 
 def validar_integridade_factual(titulo: str, texto: Optional[str]) -> Tuple[bool, str]:
-    """Valida densidade textual, bloqueios de infraestrutura e sobreposição léxica."""
+    """Valida densidade textual, bloqueios de infraestrutura e sobreposição léxica robusta."""
     if not texto or len(texto.strip()) < TAMANHO_MINIMO_TEXTO:
         return False, "TEXTO_MUITO_CURTO"
 
@@ -129,7 +134,9 @@ def validar_integridade_factual(titulo: str, texto: Optional[str]) -> Tuple[bool
 
     if len(tokens_titulo) >= 3:
         texto_lower = texto.lower()
-        if not any(token in texto_lower for token in tokens_titulo):
+        # Exige correspondência de pelo menos 2 termos distintos do título no corpo
+        matches = sum(1 for token in tokens_titulo if token in texto_lower)
+        if matches < 2:
             return False, "SEM_SOBREPOSICAO_TITULO_CORPO"
 
     return True, "APTO"
