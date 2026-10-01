@@ -74,6 +74,35 @@ def carregar_modulo_config(caminho_ou_shard: str):
     exec(conteudo_codigo, modulo.__dict__)
 
     return modulo
+    
+
+def registrar_step_summary(regiao: str, total_brutas: int, total_clusters: int, sucessos: int, bloqueados: int) -> None:
+    """
+    Registra tabela de métricas operacionais no GitHub Step Summary.
+    A gravação ocorre apenas se a variável GITHUB_STEP_SUMMARY estiver definida no ambiente.
+    """
+    caminho_summary = os.getenv("GITHUB_STEP_SUMMARY")
+    if not caminho_summary:
+        return
+
+    taxa = (sucessos / (sucessos + bloqueados) * 100) if (sucessos + bloqueados) > 0 else 0.0
+    agora = datetime.now(FUSO_BRASILIA).strftime("%d/%m/%Y %H:%M:%S")
+
+    markdown = (
+        f"### 📊 Monitoramento Regional: {regiao.upper()}\n\n"
+        f"**Data/Hora Execução:** {agora} (Horário de Brasília)\n\n"
+        f"| Métrica | Valor |\n"
+        f"| :--- | :--- |\n"
+        f"| Matérias Brutas Coletadas | {total_brutas} |\n"
+        f"| Clusters Consolidados | {total_clusters} |\n"
+        f"| Textos Extraídos com Sucesso | {sucessos} |\n"
+        f"| Bloqueadas / Falhas | {bloqueados} |\n"
+        f"| Taxa de Eficácia | {taxa:.1f}% |\n\n"
+        f"---\n"
+    )
+
+    with open(caminho_summary, "a", encoding="utf-8") as f:
+        f.write(markdown)
 
 
 def executar_pipeline(caminho_ou_shard: str) -> None:
@@ -171,13 +200,20 @@ def executar_pipeline(caminho_ou_shard: str) -> None:
     sucessos = sum(1 for r in processed_results if r["status_extracao"] == "SUCESSO")
     bloqueados = len(processed_results) - sucessos
 
-    # 5. Despacho Telegram com anexo
-    enviar_telegram(
-        regiao_nome=regiao,
-        arquivos=[nome_json],
+    # 5. Telemetria em Console e GitHub Step Summary
+    taxa_sucesso = (sucessos / len(processed_results) * 100) if processed_results else 0.0
+    print("\n" + "=" * 60, flush=True)
+    print(f"RELATÓRIO CONSOLIDADO: [{regiao.upper()}]", flush=True)
+    print(f"Matérias Brutas : {len(raw_articles)}", flush=True)
+    print(f"Clusters        : {len(clusters)}", flush=True)
+    print(f"Sucessos        : {sucessos} ({taxa_sucesso:.1f}%)", flush=True)
+    print(f"Bloqueios       : {bloqueados}", flush=True)
+    print("=" * 60 + "\n", flush=True)
+
+    registrar_step_summary(
+        regiao=regiao,
         total_brutas=len(raw_articles),
         total_clusters=len(clusters),
-        total_processadas=len(processed_results),
         sucessos=sucessos,
         bloqueados=bloqueados,
     )
