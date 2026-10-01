@@ -77,6 +77,7 @@ def executar_pipeline(caminho_config: str) -> None:
       raw_articles,
       model_name=cfg.MODELO_EMBEDDING_1024,
       similarity_threshold=cfg.SIMILARIDADE_REDUNDANCIA,
+      regiao_prefix=regiao,
   )
   print(f"Clusters consolidados: {len(clusters)}", flush=True)
 
