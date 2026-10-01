@@ -115,15 +115,35 @@ def carregar_modulo_config(caminho_ou_shard: str):
     return modulo
 
 
+def listar_ficheiros_existentes_drive() -> set:
+    """
+    Obtém a lista com os nomes exatos de todos os ficheiros existentes
+    na pasta de dados brutos do Google Drive.
+    """
+    comando = ["rclone", "lsf", "gdrive_dados:", "--files-only"]
+    proc = subprocess.run(comando, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"Falha ao aceder ao inventário do Google Drive via Rclone: {proc.stderr}"
+        )
+    
+    # Retorna o conjunto de nomes de ficheiros (ex: {'noticias_raw_2021_10_ifood.json', ...})
+    return set(f.strip() for f in proc.stdout.splitlines() if f.strip())
+
+
 def executar_pipeline(caminho_ou_shard: str, inicio_mmaaaa: str = None, fim_mmaaaa: str = None) -> None:
     cfg = carregar_modulo_config(caminho_ou_shard)
     regiao = getattr(cfg, "REGIAO_NOME", "GLOBAL").lower()
 
-    # 1. Definição do escopo temporal
+    # 1. Carrega o catálogo real do Google Drive no arranque do shard
+    print(">> Mapeando inventário de arquivos pré-existentes no Google Drive...", flush=True)
+    ficheiros_validos_drive = listar_ficheiros_existentes_drive()
+    print(f"   Total de arquivos mapeados em 'dados_brutos': {len(ficheiros_validos_drive)}", flush=True)
+
+    # Definição do escopo temporal
     if inicio_mmaaaa and fim_mmaaaa:
         meses_alvo = gerar_meses_entre(inicio_mmaaaa, fim_mmaaaa)
     else:
-        # Se não informado, executa o mês corrente
         agora = datetime.now(FUSO_BRASILIA)
         meses_alvo = [(agora.year, agora.month)]
 
@@ -143,15 +163,22 @@ def executar_pipeline(caminho_ou_shard: str, inicio_mmaaaa: str = None, fim_mmaa
         subjanelas = gerar_subjanelas_mes(ano, mes)
         tag_mes = f"{ano:04d}_{mes:02d}"
 
-        # 3. Laço Tema a Tema dentro do Mês
+        # 3. Laço Tema a Tema
         for tema, dict_idiomas in cfg.MONITORAMENTOS.items():
             tema_slug = processor.normalizar_nome_tema(tema)
             nome_arquivo_drive = f"noticias_raw_{tag_mes}_{tema_slug}.json"
 
+            # -------------------------------------------------------------
+            # TRAVA DE SEGURANÇA: Só busca se o arquivo já existir no Drive
+            # -------------------------------------------------------------
+            if nome_arquivo_drive not in ficheiros_validos_drive:
+                print(f"⚠️ [IGNORADO] {nome_arquivo_drive} não existe no Drive. Criação bloqueada.", flush=True)
+                continue
+
             print(f"\n>> Processando: {nome_arquivo_drive}...", flush=True)
             raw_artigos_tema = []
 
-            # 4. Fatiamento em 4 subjanelas para mitigar teto do RSS
+            # 4. Fatiamento em 4 subjanelas semanais
             for filtro_janela in subjanelas:
                 for mercado in mercados:
                     gl = mercado["gl"]
@@ -177,11 +204,11 @@ def executar_pipeline(caminho_ou_shard: str, inicio_mmaaaa: str = None, fim_mmaa
                 print(f"   Nenhuma matéria encontrada para {tema} em {tag_mes}.", flush=True)
                 continue
 
-            # 5. Agrupamento Semântico Leve (rapidfuzz, sem BGE-M3)
+            # 5. Agrupamento Semântico Leve
             prefixo = f"CLUS_{tag_mes}_{tema_slug[:4].upper()}"
             clusters = processor.cluster_articles_rapido(raw_artigos_tema, similarity_threshold=80.0, prefixo_id=prefixo)
 
-            # 6. Raspagem Concorrente (HTTP + Playwright Stealth em Cascata)
+            # 6. Raspagem Concorrente em Cascata
             def worker(c):
                 time.sleep(random.uniform(0.05, 0.2))
                 return processor.process_cluster_with_fallback(c, timeout=timeout_req)
@@ -203,19 +230,23 @@ def executar_pipeline(caminho_ou_shard: str, inicio_mmaaaa: str = None, fim_mmaa
             total_geral_extraidas += sucessos
             print(f"   Resultado: {sucessos}/{len(clusters)} textos extraídos com sucesso.", flush=True)
 
-            # 7. Gravação Local e Envio Imediato ao Google Drive (dados brutos)
+            # -------------------------------------------------------------
+            # 7. Gravação Local e Sobrescrita Direta no Google Drive
+            # -------------------------------------------------------------
             with open(nome_arquivo_drive, "w", encoding="utf-8") as f:
                 json.dump(processed_results, f, ensure_ascii=False, indent=2)
 
-            res = subprocess.run(["rclone", "copyto", nome_arquivo_drive, f"gdrive_dados:{nome_arquivo_drive}"], capture_output=True)
+            res = subprocess.run(
+                ["rclone", "copyto", nome_arquivo_drive, f"gdrive_dados:{nome_arquivo_drive}"],
+                capture_output=True
+            )
             if res.returncode == 0:
-                print(f"   ✓ Sincronizado no Google Drive: {nome_arquivo_drive}", flush=True)
-                os.remove(nome_arquivo_drive)  # Libera espaço em disco no runner
+                print(f"   ✓ Arquivo existente atualizado no Drive: {nome_arquivo_drive}", flush=True)
             else:
-                print(f"   ⚠️ Falha na sincronização com o Drive: {res.stderr.decode('utf-8', errors='replace')}", flush=True)
+                print(f"   ⚠️ Falha ao atualizar {nome_arquivo_drive}: {res.stderr.decode('utf-8', errors='replace')}", flush=True)
 
-    print(f"\nFinalizada a execução do Shard [{regiao.upper()}]. Total de textos extraídos: {total_geral_extraidas}\n", flush=True)
-
+    print(f"\nFinalizada a execução do Shard [{regiao.upper()}]. Total de matérias atualizadas: {total_geral_extraidas}\n", flush=True)
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Orquestrador Histórico por Shard")
