@@ -21,7 +21,6 @@ from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 import googlenewsdecoder
-from playwright.async_api import async_playwright
 from rapidfuzz import fuzz
 import requests
 import trafilatura
@@ -472,6 +471,10 @@ async def processar_bloqueados_playwright(itens_bloqueados: list) -> list:
     """Executa pool assíncrono restrito a 4 abas para resgate de matérias bloqueadas."""
     if not itens_bloqueados:
         return []
+
+    # Importação sob demanda (evita falha na Fase A, que não instala Playwright)
+    from playwright.async_api import async_playwright
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
