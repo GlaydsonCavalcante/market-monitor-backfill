@@ -1,14 +1,13 @@
 """
 processor.py
 
-Módulo de processamento RSS, desduplicação, extração resiliente com validação
-factual, fallback em espelhos de cluster e vetorização em lote com BAAI/bge-m3.
+Módulo otimizado: remoção de embeddings pesados na borda,
+deduplicação rápida via token sort ratio e raspagem resiliente em cascata.
 """
 
 import asyncio
 import base64
 from datetime import datetime
-import math
 import os
 import random
 import re
@@ -17,13 +16,13 @@ from typing import Dict, List, Optional, Tuple
 import urllib.parse
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
+import unicodedata
 
 from bs4 import BeautifulSoup
 import googlenewsdecoder
-import numpy as np
 from playwright.async_api import async_playwright
+from rapidfuzz import fuzz
 import requests
-from sentence_transformers import SentenceTransformer
 import trafilatura
 
 FUSO_BRASILIA = ZoneInfo("America/Sao_Paulo")
@@ -85,36 +84,16 @@ STOPWORDS_TITULO = {
     "le", "les", "des", "pour", "dans", "sur", "que", "is", "are", "was", "were"
 }
 
-_EMBEDDER_SINGLETON = None
 
-
-def get_embedder(model_name: str = "BAAI/bge-m3"):
-    """Instancia ou reutiliza o modelo de embeddings em padrão singleton."""
-    global _EMBEDDER_SINGLETON
-    if _EMBEDDER_SINGLETON is None:
-        print(f"Carregando {model_name} (1024d)...", flush=True)
-        _EMBEDDER_SINGLETON = SentenceTransformer(model_name)
-    return _EMBEDDER_SINGLETON
-
-
-def extrair_lead_limpo(texto: str, termos_descarte_dict: dict, max_chars: int = 1200) -> str:
-    """Higieniza o início do texto removendo termos indesejados e chamadas comerciais."""
-    if not texto or texto in ("[CONTEUDO_BLOQUEADO]", ""):
-        return ""
-    todos_descartes = [t.lower() for lista in termos_descarte_dict.values() for t in lista]
-    linhas_validas = []
-    for linha in texto.split("\n"):
-        l = linha.strip()
-        if len(l) < 25:
-            continue
-        if any(termo in l.lower() for termo in todos_descartes):
-            continue
-        linhas_validas.append(l)
-    return " ".join(linhas_validas)[:max_chars].strip()
+def normalizar_nome_tema(tema: str) -> str:
+    """Converte 'Reinvenção do Consumo' -> 'reinvencao_do_consumo'."""
+    nfkd = unicodedata.normalize("NFKD", tema)
+    sem_acento = "".join([c for c in nfkd if not unicodedata.combining(c)])
+    limpo = re.sub(r"[^\w\s-]", "", sem_acento).strip().lower()
+    return re.sub(r"[\s-]+", "_", limpo)
 
 
 def classificar_url_terminal(url: str) -> Optional[str]:
-    """Identifica URLs de redes fechadas, plataformas de mídia ou homepages."""
     if not url or not isinstance(url, str):
         return None
     try:
@@ -134,7 +113,6 @@ def classificar_url_terminal(url: str) -> Optional[str]:
 
 
 def validar_integridade_factual(titulo: str, texto: Optional[str]) -> Tuple[bool, str]:
-    """Valida densidade textual, bloqueios de infraestrutura e sobreposição léxica de substantivos."""
     if not texto or len(texto.strip()) < TAMANHO_MINIMO_TEXTO:
         return False, "TEXTO_MUITO_CURTO"
 
@@ -156,7 +134,6 @@ def validar_integridade_factual(titulo: str, texto: Optional[str]) -> Tuple[bool
 
 
 def decode_token_offline(token: str) -> Optional[str]:
-    """Decodifica URLs base64 do Google News de forma local."""
     try:
         padded = token + "=" * (-len(token) % 4)
         raw_bytes = base64.urlsafe_b64decode(padded)
@@ -171,7 +148,6 @@ def decode_token_offline(token: str) -> Optional[str]:
 
 
 def resolve_publisher_url(google_news_url: str) -> str:
-    """Decodifica URL do Google News combinando rotina offline e RPC."""
     if not google_news_url or "news.google.com" not in google_news_url:
         return google_news_url
 
@@ -194,11 +170,8 @@ def resolve_publisher_url(google_news_url: str) -> str:
     return google_news_url
 
 
-def build_rss_query(base_term: str, excluded_terms: list, period: str, preferred_domains: list) -> str:
-    """Monta a string de busca para o feed RSS."""
+def build_rss_query(base_term: str, excluded_terms: list, preferred_domains: list) -> str:
     parts = [base_term]
-    if period:
-        parts.append(f"when:{period}")
     if preferred_domains:
         sites_query = " OR ".join([f"site:{domain}" for domain in preferred_domains])
         parts.append(f"({sites_query})")
@@ -208,7 +181,6 @@ def build_rss_query(base_term: str, excluded_terms: list, period: str, preferred
 
 
 def fetch_rss_feed(query: str, hl: str, gl: str, timeout: int = 6) -> list:
-    """Consulta o RSS do Google News retornando as entradas estruturadas."""
     encoded_query = urllib.parse.quote(query)
     ceid = f"{hl.upper()}:{gl.upper()}"
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl={hl}&gl={gl}&ceid={ceid}"
@@ -233,7 +205,6 @@ def fetch_rss_feed(query: str, hl: str, gl: str, timeout: int = 6) -> list:
 
 
 def scrape_article_text(url: str, timeout: int = 5) -> Tuple[Optional[str], str, str]:
-    """Extrai texto da matéria via requisição HTTP rápida com tratamento de bloqueios."""
     real_url = resolve_publisher_url(url)
     if "news.google.com" in real_url:
         return None, "FALHA_DECODIFICACAO_URL", real_url
@@ -270,43 +241,39 @@ def scrape_article_text(url: str, timeout: int = 5) -> Tuple[Optional[str], str,
     return (text.strip() if text else None), "SUCESSO", resp.url
 
 
-def cluster_articles(
+def cluster_articles_rapido(
     raw_articles: list,
-    model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-    similarity_threshold: float = 0.73,
-    regiao_prefix: str = "GLOB",
+    similarity_threshold: float = 80.0,
+    prefixo_id: str = "CLUS",
 ) -> list:
-    """Agrupa matérias semelhantes gerando clusters de notícia com ID regional unívoco."""
+    """Deduplicação de alta velocidade via Levenshtein / Token Sort Ratio."""
     if not raw_articles:
         return []
-    embedder = get_embedder(model_name)
-    titulos = [a["titulo"] for a in raw_articles]
-    embeddings = embedder.encode(titulos, batch_size=64, show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=True)
 
     clusters = []
     visited = set()
     total = len(raw_articles)
-    data_tag = datetime.now(FUSO_BRASILIA).strftime("%Y%m%d")
-    # Utiliza o nome completo higienizado da região para eliminar risco de colisão de PK
-    shard_tag = re.sub(r"[^\w]", "_", regiao_prefix).upper().strip("_")
 
     for i in range(total):
         if i in visited:
             continue
         cluster_members = [raw_articles[i]]
         visited.add(i)
+        tit_i = raw_articles[i]["titulo"]
+
         for j in range(i + 1, total):
             if j in visited:
                 continue
-            cos_sim = float(np.dot(embeddings[i], embeddings[j]))
-            if cos_sim >= similarity_threshold:
+            tit_j = raw_articles[j]["titulo"]
+            sim = fuzz.token_sort_ratio(tit_i, tit_j)
+            if sim >= similarity_threshold:
                 cluster_members.append(raw_articles[j])
                 visited.add(j)
 
         primary = cluster_members[0]
         mirrors = [m["link"] for m in cluster_members[1:] if m["link"] != primary["link"]]
         clusters.append({
-            "id_cluster": f"CLUS_{data_tag}_{shard_tag}_{len(clusters) + 1:04d}",
+            "id_cluster": f"{prefixo_id}_{len(clusters) + 1:04d}",
             "tema": primary["tema"],
             "termo_origem": primary["termo_origem"],
             "titulo": primary["titulo"],
@@ -322,10 +289,6 @@ def cluster_articles(
 
 
 def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
-    """
-    Estágio 1 (HTTP): Itera exaustivamente pela URL primária e por todas as URLs
-    espelho até obter um texto factualmente válido.
-    """
     urls_to_try = [cluster["url_primaria"]]
     for esp in cluster.get("urls_espelho", []):
         if esp and esp not in urls_to_try:
@@ -342,7 +305,6 @@ def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
         if primeira_url_resolvida is None:
             primeira_url_resolvida = final_url
 
-        # 1. Bloqueio ou falha de conexão HTTP
         if status_http != "SUCESSO" or not texto:
             ultimo_motivo = status_http
             historico.append({
@@ -354,7 +316,6 @@ def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
             })
             continue
 
-        # 2. Validação Factual Preventiva (Shift-Left)
         apto, motivo = validar_integridade_factual(titulo, texto)
         if not apto:
             ultimo_motivo = motivo
@@ -367,7 +328,6 @@ def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
             })
             continue
 
-        # 3. Sucesso Factual: Interrompe a busca no cluster imediatamente
         historico.append({
             "url_original_rss": link,
             "url_canonica_decodificada": final_url,
@@ -413,67 +373,7 @@ def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
     }
 
 
-def gerar_vetores_em_lote(
-    processed_results: list,
-    termos_descarte_dict: dict,
-    model_name: str = "BAAI/bge-m3",
-    batch_size: int = 32,
-) -> None:
-    """Calcula embeddings BGE-M3 com log de progresso em tempo real no console."""
-    total_itens = len(processed_results)
-    if total_itens == 0:
-        return
-
-    embedder = get_embedder(model_name)
-    textos_para_vetorizar = []
-
-    for r in processed_results:
-        texto = r.get("texto_completo", "")
-        lead = (
-            extrair_lead_limpo(texto, termos_descarte_dict=termos_descarte_dict, max_chars=1200)
-            if r.get("status_extracao") == "SUCESSO"
-            else ""
-        )
-        trecho_final = f"{r['titulo']}. {lead}".strip() if lead else r["titulo"]
-        textos_para_vetorizar.append(trecho_final)
-
-    total_lotes = math.ceil(total_itens / batch_size)
-    print(f"\nIniciando vetorização de {total_itens} matérias com {model_name}...", flush=True)
-
-    vetores_finais = []
-    inicio_vetorizacao = time.time()
-
-    for idx in range(0, total_itens, batch_size):
-        lote_atual_num = (idx // batch_size) + 1
-        lote_textos = textos_para_vetorizar[idx : idx + batch_size]
-
-        t0 = time.time()
-        vetores_lote = embedder.encode(
-            lote_textos,
-            batch_size=batch_size,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
-        )
-        tempo_lote = time.time() - t0
-        vetores_finais.extend(vetores_lote.tolist())
-
-        itens_processados = min(idx + batch_size, total_itens)
-        pct = (itens_processados / total_itens) * 100
-        print(f"  >> [Lote {lote_atual_num:02d}/{total_lotes:02d}] {itens_processados}/{total_itens} ({pct:.1f}%) em {tempo_lote:.2f}s", flush=True)
-
-    for i, r in enumerate(processed_results):
-        r["vetor_1024"] = vetores_finais[i]
-
-    tempo_total = time.time() - inicio_vetorizacao
-    print(f"Vetorização finalizada com sucesso! Tempo total: {tempo_total:.2f}s\n", flush=True)
-
-
 async def _navegar_playwright_item(context, item: dict) -> dict:
-    """
-    Estágio 2 (Playwright Stealth): Percorre todas as candidatas em headless browser.
-    Não aborta a busca ao encontrar uma URL terminal; prossegue aos espelhos.
-    """
     url_primaria = item.get("url_canonica_resolvida") or item.get("url_utilizada") or ""
     candidatas = [url_primaria] if url_primaria else []
     for esp in item.get("urls_espelho_disponiveis", []):
@@ -497,7 +397,7 @@ async def _navegar_playwright_item(context, item: dict) -> dict:
 
         await page.route("**/*", interceptar_recursos)
 
-        for url_alvo in candidatas: 
+        for url_alvo in candidatas:
             cat_term = classificar_url_terminal(url_alvo)
             if cat_term:
                 ultimo_motivo = cat_term
@@ -568,7 +468,6 @@ async def _navegar_playwright_item(context, item: dict) -> dict:
 
 
 async def processar_bloqueados_playwright(itens_bloqueados: list) -> list:
-    """Executa pool assíncrono com semáforo restrito de 4 abas para resgate de matérias bloqueadas."""
     if not itens_bloqueados:
         return []
     async with async_playwright() as p:
@@ -595,9 +494,9 @@ async def processar_bloqueados_playwright(itens_bloqueados: list) -> list:
 
 
 def executar_fallback_playwright(itens_bloqueados: list) -> list:
-    """Interface síncrona para acionamento do pool assíncrono do Playwright."""
     loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    async with asyncio.set_event_loop(loop) if hasattr(asyncio, "set_event_loop") else asyncio.new_event_loop():
+        pass
     try:
         return loop.run_until_complete(processar_bloqueados_playwright(itens_bloqueados))
     finally:
