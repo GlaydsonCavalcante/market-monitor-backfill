@@ -2,7 +2,7 @@ name: Monitoramento de Mercado Multirregional
 
 on:
   schedule:
-    # Execução diária regular às 06:00 UTC (03:00 Horário de Brasília)
+    # Execução diária às 06:00 UTC (03:00 Horário de Brasília)
     - cron: '0 6 * * *'
   workflow_dispatch:
     inputs:
@@ -14,12 +14,107 @@ on:
         description: 'Mês/Ano Final (MMAAAA - ex: 092026). Deixe vazio para diário.'
         required: false
         default: ''
+      fase:
+        description: 'Fase de execução: "todas" (A seguida de B), "a" (apenas descoberta) ou "b" (apenas raspagem)'
+        required: false
+        default: 'todas'
 
 env:
   TZ: "America/Sao_Paulo"
 
 jobs: 
-  executar-shard:
+  # =========================================================================
+  # ETAPA 1: FASE A (DESCOBERTA RSS E FORMATAÇÃO DE CLUSTERS PENDENTES)
+  # =========================================================================
+  fase-a-descoberta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    if: ${{ inputs.fase == 'todas' || inputs.fase == 'a' || inputs.fase == '' || github.event_name == 'schedule' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - latam_fintechs
+          - latam_plataformas
+          - latam_tendencias
+          - anglo_fintechs
+          - anglo_plataformas
+          - anglo_tendencias
+          - europa
+          - asia_cn_sg
+          - asia_jp_kr
+          - mea_india
+
+    steps:
+      - name: Baixar codigo do repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar ambiente Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias basicas e Rclone
+        run: |
+          pip install --upgrade pip
+          pip install requests beautifulsoup4 rapidfuzz trafilatura googlenewsdecoder
+          sudo apt-get update && sudo apt-get install -y rclone
+
+      - name: Configurar Rclone para Drive
+        env:
+          GDRIVE_SA_KEY_B64: ${{ secrets.GDRIVE_SA_KEY }}
+          ID_CONFIGS: ${{ secrets.GDRIVE_CONFIG_FOLDER_ID }}
+          ID_DADOS_BRUTOS: ${{ secrets.GDRIVE_DADOS_BRUTOS_FOLDER_ID }}
+        run: |
+          echo "$GDRIVE_SA_KEY_B64" | base64 -d > /tmp/gdrive_sa.json
+          python -c 'import json; json.load(open("/tmp/gdrive_sa.json"))'
+
+          CLEAN_CONFIGS=$(echo "$ID_CONFIGS" | grep -oE '[a-zA-Z0-9_-]{25,}' | head -n 1)
+          if [ -z "$CLEAN_CONFIGS" ]; then CLEAN_CONFIGS="$ID_CONFIGS"; fi
+
+          CLEAN_DADOS=$(echo "$ID_DADOS_BRUTOS" | grep -oE '[a-zA-Z0-9_-]{25,}' | head -n 1)
+          if [ -z "$CLEAN_DADOS" ]; then CLEAN_DADOS="$ID_DADOS_BRUTOS"; fi
+
+          mkdir -p ~/.config/rclone
+          cat <<EOF > ~/.config/rclone/rclone.conf
+          [gdrive_config]
+          type = drive
+          scope = drive
+          service_account_file = /tmp/gdrive_sa.json
+          root_folder_id = $CLEAN_CONFIGS
+          include_shared_with_me = true
+
+          [gdrive_dados]
+          type = drive
+          scope = drive
+          service_account_file = /tmp/gdrive_sa.json
+          root_folder_id = $CLEAN_DADOS
+          include_shared_with_me = true
+          EOF
+
+      - name: Executar Fase A [${{ matrix.shard }}]
+        env:
+          PYTHONUNBUFFERED: "1"
+          SHARD_NAME: ${{ matrix.shard }}
+        run: |
+          PARAMS="--shard ${{ matrix.shard }} --fase a"
+          if [ -n "${{ inputs.inicio_mmaaaa }}" ] && [ -n "${{ inputs.fim_mmaaaa }}" ]; then
+            PARAMS="$PARAMS --inicio_mmaaaa ${{ inputs.inicio_mmaaaa }} --fim_mmaaaa ${{ inputs.fim_mmaaaa }}"
+          fi
+          python main.py $PARAMS
+
+      - name: Expurgo de Credenciais Temporarias
+        if: always()
+        run: rm -rf /tmp/gdrive_sa.json ~/.config/rclone/rclone.conf
+
+
+  # =========================================================================
+  # ETAPA 2: FASE B (RASPAGEM FACTUAL RESILIENTE COM TRAVA DE PRECEDÊNCIA)
+  # =========================================================================
+  fase-b-extracao:
+    needs: [fase-a-descoberta]
+    if: ${{ always() && (needs.fase-a-descoberta.result == 'success' || inputs.fase == 'b') && (inputs.fase == 'todas' || inputs.fase == 'b' || inputs.fase == '' || github.event_name == 'schedule') }}
     runs-on: ubuntu-latest
     timeout-minutes: 360  # 6 horas (limite máximo do GitHub Actions)
     strategy:
@@ -61,7 +156,7 @@ jobs:
           playwright install-deps chromium
           sudo apt-get update && sudo apt-get install -y rclone
 
-      - name: Configurar Rclone para Drive (Config e Dados Brutos)
+      - name: Configurar Rclone para Drive
         env:
           GDRIVE_SA_KEY_B64: ${{ secrets.GDRIVE_SA_KEY }}
           ID_CONFIGS: ${{ secrets.GDRIVE_CONFIG_FOLDER_ID }}
@@ -93,14 +188,14 @@ jobs:
           include_shared_with_me = true
           EOF
 
-      - name: Executar Pipeline do Shard [${{ matrix.shard }}]
+      - name: Executar Fase B [${{ matrix.shard }}]
         env:
           PYTHONUNBUFFERED: "1"
           SHARD_NAME: ${{ matrix.shard }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          PARAMS="--shard ${{ matrix.shard }}"
+          PARAMS="--shard ${{ matrix.shard }} --fase b"
           if [ -n "${{ inputs.inicio_mmaaaa }}" ] && [ -n "${{ inputs.fim_mmaaaa }}" ]; then
             PARAMS="$PARAMS --inicio_mmaaaa ${{ inputs.inicio_mmaaaa }} --fim_mmaaaa ${{ inputs.fim_mmaaaa }}"
           fi
@@ -125,5 +220,4 @@ jobs:
 
       - name: Expurgo de Credenciais Temporarias
         if: always()
-        run: |
-          rm -rf /tmp/gdrive_sa.json ~/.config/rclone/rclone.conf
+        run: rm -rf /tmp/gdrive_sa.json ~/.config/rclone/rclone.conf
