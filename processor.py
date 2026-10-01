@@ -1,153 +1,176 @@
-"""Módulo de processamento RSS, desduplicação e vetorização em lote com BAAI/bge-m3."""
+"""
+processor.py
 
+Módulo de processamento RSS, desduplicação, extração resiliente com validação
+factual e vetorização em lote com BAAI/bge-m3.
+"""
+
+import asyncio
 import base64
 from datetime import datetime
+import math
 import random
 import re
+import time
+from typing import Dict, List, Optional, Tuple
 import urllib.parse
 import xml.etree.ElementTree as ET
+
 from bs4 import BeautifulSoup
 import googlenewsdecoder
 import numpy as np
+from playwright.async_api import async_playwright
 import requests
 from sentence_transformers import SentenceTransformer
 import trafilatura
-import math
-import time
-import asyncio
-from playwright.async_api import async_playwright
 
 USER_AGENTS = [
-    (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
-        " like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    ),
-    (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-        " (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-    ),
-    (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like"
-        " Gecko) Chrome/122.0.0.0 Safari/537.36"
-    ),
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 ]
+
+TAMANHO_MINIMO_TEXTO = 150
+
+DOMINIOS_MIDIA = {
+    "youtube.com", "youtu.be", "spotify.com", "open.spotify.com",
+    "soundcloud.com", "vimeo.com", "globoplay.globo.com", "podcasts.apple.com"
+}
+DOMINIOS_FECHADOS = {
+    "twitter.com", "x.com", "facebook.com", "instagram.com", "linkedin.com"
+}
+
+PADROES_ANTIBOT = [
+    r"unsanctioned scraping by bots",
+    r"instituted a challenge designed to keep them out",
+    r"enable javascript and cookies to continue",
+    r"checking your browser before accessing",
+    r"attention required!? \| cloudflare",
+    r"please verify you are a human",
+    r"access denied \| \d+ access denied",
+    r"access\s+denied",
+    r"you\s+don'?t\s+have\s+permission\s+to\s+access",
+    r"error\s+loading\s+chunks",
+    r"ray id: [a-f0-9]{16}",
+    r"incident\s+id:",
+    r"pardon our interruption",
+    r"verifique se você é humano",
+    r"ative o javascript para continuar",
+    r"acesso negado",
+    r"security check to access",
+    r"ddos protection by cloudflare",
+    r"block details:.*incident id",
+    r"perimeterx",
+    r"datadome",
+    r"akamai\s*ghost",
+    r"403\s+forbidden",
+    r"401\s+unauthorized",
+    r"acceso\s+denegado",
+    r"permiso\s+denegado",
+    r"accès\s+refusé",
+    r"zugriff\s+verweigert",
+    r"página\s+não\s+encontrada",
+]
+REGEX_ANTIBOT = re.compile("|".join(PADROES_ANTIBOT), re.IGNORECASE)
+
+STOPWORDS_TITULO = {
+    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with",
+    "by", "from", "up", "about", "into", "over", "after", "o", "a", "os", "as", "um",
+    "uma", "de", "da", "do", "em", "para", "com", "por", "sobre", "el", "la", "los",
+    "las", "en", "por", "para", "con", "del", "al", "der", "die", "das", "und", "im",
+    "le", "les", "des", "pour", "dans", "sur", "que", "is", "are", "was", "were"
+}
 
 _EMBEDDER_SINGLETON = None
 
 
 def get_embedder(model_name: str = "BAAI/bge-m3"):
-  global _EMBEDDER_SINGLETON
-  if _EMBEDDER_SINGLETON is None:
-    print(f"Carregando {model_name} (1024d)...", flush=True)
-    _EMBEDDER_SINGLETON = SentenceTransformer(model_name)
-  return _EMBEDDER_SINGLETON
+    """Instancia ou reutiliza o modelo de embeddings em padrão singleton."""
+    global _EMBEDDER_SINGLETON
+    if _EMBEDDER_SINGLETON is None:
+        print(f"Carregando {model_name} (1024d)...", flush=True)
+        _EMBEDDER_SINGLETON = SentenceTransformer(model_name)
+    return _EMBEDDER_SINGLETON
 
 
-def extrair_lead_limpo(
-    texto: str, termos_descarte_dict: dict, max_chars: int = 1200
-) -> str:
-  if not texto or texto == "[CONTEUDO_BLOQUEADO]":
-    return ""
-  todos_descartes = [
-      t.lower() for lista in termos_descarte_dict.values() for t in lista
-  ]
-  linhas_validas = []
-  for linha in texto.split("\n"):
-    l = linha.strip()
-    if len(l) < 25:
-      continue
-    if any(termo in l.lower() for termo in todos_descartes):
-      continue
-    linhas_validas.append(l)
-  return " ".join(linhas_validas)[:max_chars].strip()
+def extrair_lead_limpo(texto: str, termos_descarte_dict: dict, max_chars: int = 1200) -> str:
+    """Higieniza o início do texto removendo termos indesejados e chamadas comerciais."""
+    if not texto or texto in ("[CONTEUDO_BLOQUEADO]", ""):
+        return ""
+    todos_descartes = [t.lower() for lista in termos_descarte_dict.values() for t in lista]
+    linhas_validas = []
+    for linha in texto.split("\n"):
+        l = linha.strip()
+        if len(l) < 25:
+            continue
+        if any(termo in l.lower() for termo in todos_descartes):
+            continue
+        linhas_validas.append(l)
+    return " ".join(linhas_validas)[:max_chars].strip()
 
 
-def build_rss_query(
-    base_term: str,
-    excluded_terms: list,
-    period: str,
-    preferred_domains: list,
-) -> str:
-  parts = [base_term]
-  if period:
-    parts.append(f"when:{period}")
-  if preferred_domains:
-    sites_query = " OR ".join(
-        [f"site:{domain}" for domain in preferred_domains]
-    )
-    parts.append(f"({sites_query})")
-  if excluded_terms:
-    parts.extend([f"-{term}" for term in excluded_terms])
-  return " ".join(parts)
+def classificar_url_terminal(url: str) -> Optional[str]:
+    """Identifica URLs que pertencem a redes fechadas, plataformas de mídia ou homepages."""
+    if not url or not isinstance(url, str):
+        return None
+    try:
+        parsed = urllib.parse.urlparse(url.lower())
+        netloc = parsed.netloc.replace("www.", "")
+        if any(netloc == d or netloc.endswith("." + d) for d in DOMINIOS_MIDIA):
+            return "CONTEUDO_MIDIA"
+        if any(netloc == d or netloc.endswith("." + d) for d in DOMINIOS_FECHADOS):
+            return "PLATAFORMA_FECHADA"
+        path = parsed.path.strip("/")
+        if not path or path in ["index.html", "index.php", "home", "noticias", "economia", "politica"]:
+            if not parsed.query:
+                return "REDIRECT_HOMEPAGE"
+    except Exception:
+        pass
+    return None
 
 
-def fetch_rss_feed(
-    query: str, hl: str, gl: str, timeout: int = 6
-) -> list:
-  encoded_query = urllib.parse.quote(query)
-  ceid = f"{hl.upper()}:{gl.upper()}"
-  url = f"https://news.google.com/rss/search?q={encoded_query}&hl={hl}&gl={gl}&ceid={ceid}"
-  headers = {"User-Agent": random.choice(USER_AGENTS)}
-  try:
-    response = requests.get(url, headers=headers, timeout=timeout)
-    if response.status_code != 200:
-      return []
-    root = ET.fromstring(response.content)
-    feed_items = []
-    for item in root.findall(".//channel/item"):
-      title = item.find("title").text if item.find("title") is not None else ""
-      link = item.find("link").text if item.find("link") is not None else ""
-      pub_date = (
-          item.find("pubDate").text if item.find("pubDate") is not None else ""
-      )
-      source = (
-          item.find("source").text
-          if item.find("source") is not None
-          else "Google News"
-      )
-      snippet = (
-          item.find("description").text
-          if item.find("description") is not None
-          else ""
-      )
-      feed_items.append({
-          "titulo": title.strip(),
-          "link": link.strip(),
-          "data_noticia": pub_date.strip(),
-          "fonte": source.strip(),
-          "snippet": snippet.strip(),
-      })
-    return feed_items
-  except Exception:
-    return []
+def validar_integridade_factual(titulo: str, texto: Optional[str]) -> Tuple[bool, str]:
+    """Valida densidade textual, bloqueios de CDN e sobreposição léxica de substantivos."""
+    if not texto or len(texto.strip()) < TAMANHO_MINIMO_TEXTO:
+        return False, "TEXTO_MUITO_CURTO"
+
+    amostra = texto[:2500]
+    if REGEX_ANTIBOT.search(amostra):
+        return False, "ERRO_SCRAPING_BLOQUEIO_CDN"
+
+    tokens_titulo = [
+        t.lower() for t in re.findall(r"\b[a-zA-Z0-9\u00C0-\u00FF]{4,}\b", titulo or "")
+        if t.lower() not in STOPWORDS_TITULO
+    ]
+
+    if len(tokens_titulo) >= 3:
+        texto_lower = texto.lower()
+        if not any(token in texto_lower for token in tokens_titulo):
+            return False, "SEM_SOBREPOSICAO_TITULO_CORPO"
+
+    return True, "APTO"
 
 
-def decode_token_offline(token: str) -> str:
-  try:
-    padded = token + "=" * (-len(token) % 4)
-    raw_bytes = base64.urlsafe_b64decode(padded)
-    matches = re.findall(
-        rb"https?://[a-zA-Z0-9_\-\.\/\?\=\&\%\#\:\@]+", raw_bytes
-    )
-    for url_bytes in matches:
-      url_str = url_bytes.decode("utf-8", errors="ignore")
-      if (
-          "google.com" not in url_str
-          and "schema.org" not in url_str
-          and len(url_str) > 15
-      ):
-        return url_str
-  except Exception:
-    pass
-  return None
+def decode_token_offline(token: str) -> Optional[str]:
+    """Decodifica URLs base64 do Google News de forma local."""
+    try:
+        padded = token + "=" * (-len(token) % 4)
+        raw_bytes = base64.urlsafe_b64decode(padded)
+        matches = re.findall(rb"https?://[a-zA-Z0-9_\-\.\/\?\=\&\%\#\:\@]+", raw_bytes)
+        for url_bytes in matches:
+            url_str = url_bytes.decode("utf-8", errors="ignore")
+            if "google.com" not in url_str and "schema.org" not in url_str and len(url_str) > 15:
+                return url_str
+    except Exception:
+        pass
+    return None
 
 
 def resolve_publisher_url(google_news_url: str) -> str:
-    """Decodifica URLs do Google News combinando método offline e RPC atualizado."""
+    """Decodifica URL do Google News combinando rotina offline e RPC."""
     if not google_news_url or "news.google.com" not in google_news_url:
         return google_news_url
 
-    # 1. Tentativa offline via regex e base64
     clean_url = google_news_url.split("?")[0].strip()
     match = re.search(r"/articles/([^/?&]+)", clean_url)
     if match:
@@ -155,46 +178,73 @@ def resolve_publisher_url(google_news_url: str) -> str:
         if extracted and "google.com" not in extracted:
             return extracted
 
-    # 2. Resolução via biblioteca googlenewsdecoder atualizada
     try:
         res = googlenewsdecoder.decoderv1(google_news_url, interval=0.1)
         if isinstance(res, dict) and res.get("status"):
             decoded = res.get("decoded_url")
             if decoded and decoded.startswith("http") and "news.google.com" not in decoded:
                 return decoded
-    except Exception as exc:
-        print(f"[AVISO] Falha ao decodificar via RPC: {exc}", flush=True)
+    except Exception:
+        pass
 
     return google_news_url
 
 
-PADROES_ANTIBOT = [
-    r"unsanctioned scraping by bots",
-    r"attention required!? \| cloudflare",
-    r"please verify you are a human",
-    r"access denied",
-    r"verifique se você é humano",
-    r"ative o javascript",
-    r"ddos protection by cloudflare",
-]
-REGEX_ANTIBOT = re.compile("|".join(PADROES_ANTIBOT), re.IGNORECASE)
+def build_rss_query(base_term: str, excluded_terms: list, period: str, preferred_domains: list) -> str:
+    """Monta a string de busca para a URL do RSS."""
+    parts = [base_term]
+    if period:
+        parts.append(f"when:{period}")
+    if preferred_domains:
+        sites_query = " OR ".join([f"site:{domain}" for domain in preferred_domains])
+        parts.append(f"({sites_query})")
+    if excluded_terms:
+        parts.extend([f"-{term}" for term in excluded_terms])
+    return " ".join(parts)
 
-def scrape_article_text(url: str, timeout: int = 5) -> tuple:
-    """Extrai conteúdo textual da matéria via HTTP rápido com captura segura de falhas de conexão."""
+
+def fetch_rss_feed(query: str, hl: str, gl: str, timeout: int = 6) -> list:
+    """Consulta o RSS do Google News retornando os itens estruturados."""
+    encoded_query = urllib.parse.quote(query)
+    ceid = f"{hl.upper()}:{gl.upper()}"
+    url = f"https://news.google.com/rss/search?q={encoded_query}&hl={hl}&gl={gl}&ceid={ceid}"
+    headers = {"User-Agent": random.choice(USER_AGENTS)}
+    try:
+        response = requests.get(url, headers=headers, timeout=timeout)
+        if response.status_code != 200:
+            return []
+        root = ET.fromstring(response.content)
+        feed_items = []
+        for item in root.findall(".//channel/item"):
+            feed_items.append({
+                "titulo": (item.find("title").text or "").strip(),
+                "link": (item.find("link").text or "").strip(),
+                "data_noticia": (item.find("pubDate").text or "").strip(),
+                "fonte": (item.find("source").text or "Google News").strip() if item.find("source") is not None else "Google News",
+                "snippet": (item.find("description").text or "").strip(),
+            })
+        return feed_items
+    except Exception:
+        return []
+
+
+def scrape_article_text(url: str, timeout: int = 5) -> Tuple[Optional[str], str, str]:
+    """Extrai texto da matéria via requisição HTTP rápida com tratamento de bloqueios."""
     real_url = resolve_publisher_url(url)
     if "news.google.com" in real_url:
         return None, "FALHA_DECODIFICACAO_URL", real_url
+
+    cat_term = classificar_url_terminal(real_url)
+    if cat_term:
+        return None, cat_term, real_url
 
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7,es;q=0.6",
     }
-    
     try:
-        resp = requests.get(
-            real_url, headers=headers, timeout=(3.0, float(timeout)), allow_redirects=True
-        )
+        resp = requests.get(real_url, headers=headers, timeout=(2.5, float(timeout)), allow_redirects=True)
     except requests.exceptions.RequestException as e:
         return None, f"FALHA_CONEXAO_{type(e).__name__}", real_url
 
@@ -205,148 +255,121 @@ def scrape_article_text(url: str, timeout: int = 5) -> tuple:
     if not html_content:
         return None, "HTML_VAZIO", resp.url
 
-    if REGEX_ANTIBOT.search(html_content[:5000]):
-        return None, "BLOQUEIO_ANTIBOT", resp.url
-
-    text = trafilatura.extract(
-        html_content,
-        include_comments=False,
-        include_tables=False,
-        include_links=False,
-        output_format="txt",
-    )
-
-    if not text or len(text.strip()) < 150:
+    text = trafilatura.extract(html_content, include_comments=False, include_tables=False, output_format="txt")
+    if not text or len(text.strip()) < TAMANHO_MINIMO_TEXTO:
         soup = BeautifulSoup(html_content, "html.parser")
         for tag in soup(["script", "style", "nav", "header", "footer", "aside", "form"]):
             tag.decompose()
         paragraphs = [p.get_text().strip() for p in soup.find_all("p") if len(p.get_text().strip()) > 35]
         text = "\n\n".join(paragraphs)
 
-    if text and len(text.strip()) >= 150 and not REGEX_ANTIBOT.search(text):
-        return text.strip(), "SUCESSO", resp.url
-
-    return None, "CONTEUDO_INSUFICIENTE", resp.url
+    return (text.strip() if text else None), "SUCESSO", resp.url
 
 
-def cluster_articles(
-    raw_articles: list,
-    model_name: str = "BAAI/bge-m3",
-    similarity_threshold: float = 0.73,
-) -> list:
-  if not raw_articles:
-    return []
-  embedder = get_embedder(model_name)
-  titulos = [a["titulo"] for a in raw_articles]
-  embeddings = embedder.encode(
-      titulos,
-      batch_size=64,
-      show_progress_bar=False,
-      convert_to_numpy=True,
-      normalize_embeddings=True,
-  )
+def cluster_articles(raw_articles: list, model_name: str = "BAAI/bge-m3", similarity_threshold: float = 0.73) -> list:
+    """Agrupa matérias semelhantes gerando clusters de notícia com lista de espelhos."""
+    if not raw_articles:
+        return []
+    embedder = get_embedder(model_name)
+    titulos = [a["titulo"] for a in raw_articles]
+    embeddings = embedder.encode(titulos, batch_size=64, show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=True)
 
-  clusters = []
-  visited = set()
-  total = len(raw_articles)
+    clusters = []
+    visited = set()
+    total = len(raw_articles)
 
-  for i in range(total):
-    if i in visited:
-      continue
-    cluster_members = [raw_articles[i]]
-    visited.add(i)
-    for j in range(i + 1, total):
-      if j in visited:
-        continue
-      cos_sim = float(np.dot(embeddings[i], embeddings[j]))
-      if cos_sim >= similarity_threshold:
-        cluster_members.append(raw_articles[j])
-        visited.add(j)
+    for i in range(total):
+        if i in visited:
+            continue
+        cluster_members = [raw_articles[i]]
+        visited.add(i)
+        for j in range(i + 1, total):
+            if j in visited:
+                continue
+            cos_sim = float(np.dot(embeddings[i], embeddings[j]))
+            if cos_sim >= similarity_threshold:
+                cluster_members.append(raw_articles[j])
+                visited.add(j)
 
-    primary = cluster_members[0]
-    mirrors = [
-        m["link"] for m in cluster_members[1:3] if m["link"] != primary["link"]
-    ]
-    clusters.append({
-        "id_cluster": (
-            f"CLUS_{datetime.now().strftime('%Y%m%d')}_{len(clusters) + 1:04d}"
-        ),
-        "tema": primary["tema"],
-        "termo_origem": primary["termo_origem"],
-        "titulo": primary["titulo"],
-        "data_noticia": primary["data_noticia"],
-        "fonte_principal": primary["fonte"],
-        "url_primaria": primary["link"],
-        "urls_espelho": mirrors,
-        "snippet": primary["snippet"],
-        "pais_emissao": primary["pais_emissao"],
-        "idioma": primary["idioma"],
-    })
-  return clusters
+        primary = cluster_members[0]
+        mirrors = [m["link"] for m in cluster_members[1:] if m["link"] != primary["link"]]
+        clusters.append({
+            "id_cluster": f"CLUS_{datetime.now().strftime('%Y%m%d')}_{len(clusters) + 1:04d}",
+            "tema": primary["tema"],
+            "termo_origem": primary["termo_origem"],
+            "titulo": primary["titulo"],
+            "data_noticia": primary["data_noticia"],
+            "fonte_principal": primary["fonte"],
+            "url_primaria": primary["link"],
+            "urls_espelho": mirrors,
+            "snippet": primary["snippet"],
+            "pais_emissao": primary["pais_emissao"],
+            "idioma": primary["idioma"],
+        })
+    return clusters
 
 
-def process_cluster_with_fallback(
-    cluster: dict, timeout: int = 6
-) -> dict:
-  urls_to_try = [cluster["url_primaria"]] + cluster["urls_espelho"]
-  historico = []
-  espelhos_decodificados = [
-      resolve_publisher_url(e) for e in cluster["urls_espelho"]
-  ]
-  primeira_url_decodificada = None
+def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
+    """Extrai conteúdo do cluster com autocura em cascata entre a primária e os espelhos."""
+    urls_to_try = [cluster["url_primaria"]] + cluster.get("urls_espelho", [])
+    historico = []
+    espelhos_decodificados = [resolve_publisher_url(e) for e in cluster.get("urls_espelho", [])]
+    titulo = cluster.get("titulo", "")
+    primeira_url = None
+    ultimo_motivo = "HTTP_TIMEOUT_OU_BLOQUEIO"
 
-  for link in urls_to_try:
-    texto, status, final_url = scrape_article_text(link, timeout=timeout)
-    if primeira_url_decodificada is None:
-      primeira_url_decodificada = final_url
-    historico.append({
-        "url_original_rss": link,
-        "url_canonica_decodificada": final_url,
-        "status": status,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    })
+    for link in urls_to_try:
+        texto, status_http, final_url = scrape_article_text(link, timeout=timeout)
+        if primeira_url is None:
+            primeira_url = final_url
 
-    if status == "SUCESSO":
-      return {
-          "id_cluster": cluster["id_cluster"],
-          "tema": cluster["tema"],
-          "termo_origem": cluster["termo_origem"],
-          "titulo": cluster["titulo"],
-          "data_noticia": cluster["data_noticia"],
-          "idioma": cluster["idioma"],
-          "fonte_utilizada": cluster["fonte_principal"],
-          "url_utilizada": final_url,
-          "urls_espelho_disponiveis": espelhos_decodificados,
-          "status_extracao": "SUCESSO",
-          "texto_completo": texto,
-          "motivo_bloqueio": None,
-          "necessita_extracao_manual": False,
-          "historico_tentativas": historico,
-      }
+        historico.append({
+            "url_original_rss": link,
+            "url_canonica_decodificada": final_url,
+            "status": status_http,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
 
-  return {
-    "id_cluster": cluster["id_cluster"],
-    "tema": cluster["tema"],
-    "termo_origem": cluster["termo_origem"],
-    "titulo": cluster["titulo"],
-    "data_noticia": cluster["data_noticia"],
-    "idioma": cluster["idioma"],
-    "fonte_utilizada": cluster["fonte_principal"],
-    "url_utilizada": (
-        primeira_url_decodificada
-        if primeira_url_decodificada
-        else cluster["url_primaria"]
-    ),
-    "urls_espelho_disponiveis": espelhos_decodificados,
-    "status_extracao": "BLOQUEADO",
-    "texto_completo": "[CONTEUDO_BLOQUEADO]",
-    "motivo_bloqueio": (
-        f"Acesso protegido ou indisponível em todas as {len(urls_to_try)}"
-        " fontes testadas."
-    ),
-    "necessita_extracao_manual": True,
-    "historico_tentativas": historico,
-  }
+        if status_http == "SUCESSO" and texto:
+            apto, motivo = validar_integridade_factual(titulo, texto)
+            if apto:
+                return {
+                    "id_cluster": cluster["id_cluster"],
+                    "tema": cluster["tema"],
+                    "termo_origem": cluster["termo_origem"],
+                    "titulo": titulo,
+                    "data_noticia": cluster["data_noticia"],
+                    "idioma": cluster["idioma"],
+                    "fonte_utilizada": cluster["fonte_principal"],
+                    "url_utilizada": final_url,
+                    "url_canonica_resolvida": final_url,
+                    "urls_espelho_disponiveis": [u for u in espelhos_decodificados if u != final_url],
+                    "status_extracao": "SUCESSO",
+                    "texto_completo": texto,
+                    "motivo_bloqueio": None,
+                    "necessita_extracao_manual": False,
+                    "historico_tentativas": historico,
+                }
+            else:
+                ultimo_motivo = motivo
+
+    return {
+        "id_cluster": cluster["id_cluster"],
+        "tema": cluster["tema"],
+        "termo_origem": cluster["termo_origem"],
+        "titulo": titulo,
+        "data_noticia": cluster["data_noticia"],
+        "idioma": cluster["idioma"],
+        "fonte_utilizada": cluster["fonte_principal"],
+        "url_utilizada": primeira_url or cluster["url_primaria"],
+        "url_canonica_resolvida": primeira_url or cluster["url_primaria"],
+        "urls_espelho_disponiveis": espelhos_decodificados,
+        "status_extracao": "CONTEUDO_BLOQUEADO",
+        "texto_completo": "",
+        "motivo_bloqueio": ultimo_motivo,
+        "necessita_extracao_manual": True,
+        "historico_tentativas": historico,
+    }
 
 
 def gerar_vetores_em_lote(
@@ -355,82 +378,77 @@ def gerar_vetores_em_lote(
     model_name: str = "BAAI/bge-m3",
     batch_size: int = 32,
 ) -> None:
-  """Calcula embeddings BGE-M3 com log de progresso em tempo real no console."""
-  total_itens = len(processed_results)
-  if total_itens == 0:
-    return
+    """Calcula embeddings BGE-M3 com log de progresso em tempo real no console."""
+    total_itens = len(processed_results)
+    if total_itens == 0:
+        return
 
-  embedder = get_embedder(model_name)
-  textos_para_vetorizar = []
+    embedder = get_embedder(model_name)
+    textos_para_vetorizar = []
 
-  for r in processed_results:
-    texto = r.get("texto_completo", "")
-    lead = (
-        extrair_lead_limpo(
-            texto, termos_descarte_dict=termos_descarte_dict, max_chars=1200
+    for r in processed_results:
+        texto = r.get("texto_completo", "")
+        lead = (
+            extrair_lead_limpo(texto, termos_descarte_dict=termos_descarte_dict, max_chars=1200)
+            if r.get("status_extracao") == "SUCESSO"
+            else ""
         )
-        if r.get("status_extracao") == "SUCESSO"
-        else ""
-    )
-    trecho_final = f"{r['titulo']}. {lead}".strip() if lead else r["titulo"]
-    textos_para_vetorizar.append(trecho_final)
+        trecho_final = f"{r['titulo']}. {lead}".strip() if lead else r["titulo"]
+        textos_para_vetorizar.append(trecho_final)
 
-  total_lotes = math.ceil(total_itens / batch_size)
-  print(
-      f"\nIniciando vetorização de {total_itens} matérias com {model_name}...",
-      flush=True,
-  )
-  print(
-      f"Configuração: {total_lotes} lotes de até {batch_size} itens.",
-      flush=True,
-  )
+    total_lotes = math.ceil(total_itens / batch_size)
+    print(f"\nIniciando vetorização de {total_itens} matérias com {model_name}...", flush=True)
+    print(f"Configuração: {total_lotes} lotes de até {batch_size} itens.", flush=True)
 
-  vetores_finais = []
-  inicio_vetorizacao = time.time()
+    vetores_finais = []
+    inicio_vetorizacao = time.time()
 
-  for idx in range(0, total_itens, batch_size):
-    lote_atual_num = (idx // batch_size) + 1
-    lote_textos = textos_para_vetorizar[idx : idx + batch_size]
+    for idx in range(0, total_itens, batch_size):
+        lote_atual_num = (idx // batch_size) + 1
+        lote_textos = textos_para_vetorizar[idx : idx + batch_size]
 
-    t0 = time.time()
-    vetores_lote = embedder.encode(
-        lote_textos,
-        batch_size=batch_size,
-        show_progress_bar=False,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-    )
-    tempo_lote = time.time() - t0
+        t0 = time.time()
+        vetores_lote = embedder.encode(
+            lote_textos,
+            batch_size=batch_size,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+        tempo_lote = time.time() - t0
+        vetores_finais.extend(vetores_lote.tolist())
 
-    vetores_finais.extend(vetores_lote.tolist())
+        itens_processados = min(idx + batch_size, total_itens)
+        pct = (itens_processados / total_itens) * 100
+        print(
+            f"  >> [Lote {lote_atual_num:02d}/{total_lotes:02d}] {itens_processados}/{total_itens} ({pct:.1f}%) vetorizados em {tempo_lote:.2f}s",
+            flush=True,
+        )
 
-    itens_processados = min(idx + batch_size, total_itens)
-    pct = (itens_processados / total_itens) * 100
-    print(
-        f"  >> [Lote {lote_atual_num:02d}/{total_lotes:02d}]"
-        f" {itens_processados}/{total_itens} ({pct:.1f}%) vetorizados em"
-        f" {tempo_lote:.2f}s",
-        flush=True,
-    )
+    for i, r in enumerate(processed_results):
+        r["vetor_1024"] = vetores_finais[i]
 
-  for i, r in enumerate(processed_results):
-    r["vetor_1024"] = vetores_finais[i]
+    tempo_total = time.time() - inicio_vetorizacao
+    print(f"Vetorização finalizada com sucesso! Tempo total: {tempo_total:.2f}s\n", flush=True)
 
-  tempo_total = time.time() - inicio_vetorizacao
-  print(
-      f"Vetorização finalizada com sucesso! Tempo total: {tempo_total:.2f}s\n",
-      flush=True,
-  )
 
 async def _navegar_playwright_item(context, item: dict) -> dict:
-    """Abre a URL no Chromium headless, gerencia consentimentos e resolve o texto final."""
-    url_alvo = item.get("url_utilizada") or item.get("url_primaria") or ""
+    """Navegação headless assíncrona com fallback em cascata nos espelhos do cluster."""
+    url_primaria = item.get("url_canonica_resolvida") or item.get("url_utilizada") or ""
+    candidatas = [url_primaria] if url_primaria else []
+    for esp in item.get("urls_espelho_disponiveis", []):
+        if esp not in candidatas and esp.startswith("http"):
+            candidatas.append(esp)
+
+    titulo = item.get("titulo", "")
     page = None
+    sucesso = False
+    ultimo_motivo = "CONTEUDO_CURTO_OU_BLOQUEADO"
+
     try:
         page = await context.new_page()
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-        # Interceptador assíncrono estrito para abortar mídia sem deixar corrotinas pendentes
         async def interceptar_recursos(route):
             if route.request.resource_type in ["image", "media", "font", "stylesheet"]:
                 await route.abort()
@@ -438,87 +456,96 @@ async def _navegar_playwright_item(context, item: dict) -> dict:
                 await route.continue_()
 
         await page.route("**/*", interceptar_recursos)
-        await page.goto(url_alvo, wait_until="domcontentloaded", timeout=7000)
 
-        # Transposição de barreiras de consentimento do Google
-        if "consent.google" in page.url or "google.com" in page.url:
-            for sel in ["button:has-text('Aceitar tudo')", "button:has-text('Concordo')", "button:has-text('Accept all')"]:
+        for url_alvo in candidatas[:2]:
+            cat_term = classificar_url_terminal(url_alvo)
+            if cat_term:
+                item["status_extracao"] = "CONTEUDO_BLOQUEADO"
+                item["motivo_bloqueio"] = cat_term
+                return item
+
+            try:
+                await page.goto(url_alvo, wait_until="domcontentloaded", timeout=9000)
+            except Exception:
+                ultimo_motivo = "TIMEOUT_BROWSER"
+                continue
+
+            if "consent.google" in page.url or "google.com" in page.url:
+                for sel in ["button:has-text('Aceitar tudo')", "button:has-text('Concordo')", "button:has-text('Accept all')"]:
+                    try:
+                        btn = page.locator(sel).first
+                        if await btn.is_visible(timeout=600):
+                            await btn.click()
+                            break
+                    except Exception:
+                        pass
                 try:
-                    btn = page.locator(sel).first
-                    if await btn.is_visible(timeout=600):
-                        await btn.click()
-                        break
+                    await page.wait_for_url(lambda u: "google" not in u, timeout=3000)
                 except Exception:
                     pass
-            try:
-                await page.wait_for_url(lambda u: "google" not in u, timeout=5000)
-            except Exception:
-                pass
 
-        url_real = page.url
+            url_real = page.url
+            if "google.com" in url_real or "consent.google" in url_real:
+                ultimo_motivo = "NAO_REDIRECIONOU_GOOGLE"
+                continue
 
-        # Se não redirecionou para fora do Google, aborta para não capturar texto irrelevante
-        if "google.com" in url_real or "consent.google" in url_real:
-            item["status_extracao"] = "FALHA_ACESSO"
-            item["motivo_bloqueio"] = "NAO_REDIRECIONOU_GOOGLE"
-            return item
+            html_content = await page.content()
+            text = trafilatura.extract(html_content, include_comments=False, include_tables=False, output_format="txt")
+            if not text or len(text.strip()) < TAMANHO_MINIMO_TEXTO:
+                soup = BeautifulSoup(html_content, "html.parser")
+                for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
+                    tag.decompose()
+                paragraphs = [p.get_text().strip() for p in soup.find_all("p") if len(p.get_text().strip()) > 35]
+                text = "\n\n".join(paragraphs)
 
-        html_content = await page.content()
+            apto, motivo = validar_integridade_factual(titulo, text)
+            if apto:
+                item["texto_completo"] = text.strip()
+                item["status_extracao"] = "SUCESSO"
+                item["url_utilizada"] = url_real
+                item["url_canonica_resolvida"] = url_real
+                item["motivo_bloqueio"] = None
+                item["necessita_extracao_manual"] = False
+                sucesso = True
+                break
+            else:
+                ultimo_motivo = motivo
 
-        text = trafilatura.extract(html_content, include_comments=False, include_tables=False, output_format="txt")
-        if not text or len(text.strip()) < 150:
-            soup = BeautifulSoup(html_content, "html.parser")
-            for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
-                tag.decompose()
-            paragrafos = [p.get_text().strip() for p in soup.find_all("p") if len(p.get_text().strip()) > 35]
-            text = "\n\n".join(paragrafos)
-
-        if text and len(text.strip()) >= 150 and not REGEX_ANTIBOT.search(text):
-            item["texto_completo"] = text.strip()
-            item["status_extracao"] = "SUCESSO"
-            item["url_utilizada"] = url_real
-            item["motivo_bloqueio"] = None
-            item["necessita_extracao_manual"] = False
-        else:
-            item["status_extracao"] = "TEXTO_INSUFICIENTE"
-            item["motivo_bloqueio"] = "CONTEUDO_CURTO_OU_BLOQUEADO"
+        if not sucesso:
+            item["status_extracao"] = "CONTEUDO_BLOQUEADO"
+            item["texto_completo"] = ""
+            item["motivo_bloqueio"] = ultimo_motivo
 
     except Exception as e:
-        item["status_extracao"] = "TIMEOUT_BROWSER"
+        item["status_extracao"] = "CONTEUDO_BLOQUEADO"
         item["motivo_bloqueio"] = f"ERRO_PLAYWRIGHT: {type(e).__name__}"
     finally:
         if page:
-            await page.close()
+            try:
+                await page.close()
+            except Exception:
+                pass
     return item
 
 
 async def processar_bloqueados_playwright(itens_bloqueados: list) -> list:
-    """Executa o pool assíncrono com semáforo de 4 abas e timeout compatível com a esteira."""
+    """Executa o pool assíncrono com semáforo de 4 abas para resgate das matérias bloqueadas."""
     if not itens_bloqueados:
         return []
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-gpu",
-            ],
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--disable-gpu"],
         )
-        context = await browser.new_context(
-            user_agent=random.choice(USER_AGENTS),
-            viewport={"width": 1280, "height": 800},
-        )
+        context = await browser.new_context(user_agent=random.choice(USER_AGENTS), viewport={"width": 1280, "height": 800})
         sem = asyncio.Semaphore(4)
 
         async def _safe_run(item):
             async with sem:
                 try:
-                    # Timeout expandido para 18 segundos para acomodar navegações lentas no runner
                     return await asyncio.wait_for(_navegar_playwright_item(context, item), timeout=18.0)
                 except asyncio.TimeoutError:
-                    item["status_extracao"] = "TIMEOUT_BROWSER"
+                    item["status_extracao"] = "CONTEUDO_BLOQUEADO"
                     item["motivo_bloqueio"] = "DEADLOCK_TIMEOUT"
                     return item
 
@@ -526,7 +553,7 @@ async def processar_bloqueados_playwright(itens_bloqueados: list) -> list:
         await context.close()
         await browser.close()
         return resultados
-        
+
 
 def executar_fallback_playwright(itens_bloqueados: list) -> list:
     """Interface síncrona para chamar o pool assíncrono do Playwright."""
