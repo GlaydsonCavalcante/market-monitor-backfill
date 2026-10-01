@@ -23,12 +23,16 @@ import pandas as pd
 import processor
 import subprocess
 import types
+from zoneinfo import ZoneInfo
+
+FUSO_BRASILIA = ZoneInfo("America/Sao_Paulo")
+
 
 def carregar_modulo_config(caminho_ou_shard: str):
     """
-    Carrega configuração em memória RAM.
-    Se for um caminho de arquivo local existente, lê do disco.
-    Se for um identificador de shard, faz streaming direto do Google Drive via Rclone sem criar arquivos locais.
+    Carrega a configuração dinamicamente na memória RAM.
+    Lê do disco se for caminho local ou faz streaming do Google Drive via Rclone.
+    Suporta fallback de encoding (UTF-8, UTF-8-BOM, UTF-16) sem gravar arquivos.
     """
     if os.path.exists(caminho_ou_shard):
         spec = importlib.util.spec_from_file_location("config_modulo", caminho_ou_shard)
@@ -37,18 +41,40 @@ def carregar_modulo_config(caminho_ou_shard: str):
         spec.loader.exec_module(modulo)
         return modulo
 
-    # Streaming em memória diretamente do Google Drive via Rclone
-    nome_arquivo = f"config_{caminho_ou_shard}.py" if not caminho_ou_shard.endswith(".py") else caminho_ou_shard
+    nome_arquivo = (
+        f"config_{caminho_ou_shard}.py"
+        if not caminho_ou_shard.endswith(".py")
+        else caminho_ou_shard
+    )
     comando = ["rclone", "cat", f"gdrive_config:{nome_arquivo}"]
-    
-    proc = subprocess.run(comando, capture_output=True, text=True, check=True)
-    
+
+    proc = subprocess.run(comando, capture_output=True)
+    if proc.returncode != 0:
+        erro_msg = proc.stderr.decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"Falha ao ler {nome_arquivo} do Google Drive via Rclone.\nDetalhes: {erro_msg}"
+        )
+
+    # Decodificação tolerante a múltiplos encodings
+    conteudo_codigo = None
+    for enc in ["utf-8-sig", "utf-8", "utf-16", "latin-1"]:
+        try:
+            conteudo_codigo = proc.stdout.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+
+    if conteudo_codigo is None:
+        raise ValueError(f"Não foi possível decodificar o arquivo {nome_arquivo}.")
+
     modulo = types.ModuleType("config_modulo")
     modulo.__file__ = f"<gdrive_config:{nome_arquivo}>"
     sys.modules["config_modulo"] = modulo
-    exec(proc.stdout, modulo.__dict__)
-    
+    exec(conteudo_codigo, modulo.__dict__)
+
     return modulo
+
+ts = datetime.now(FUSO_BRASILIA).strftime("%Y%m%d_%H%M%S")
 
 def executar_pipeline(caminho_config: str) -> None:
   cfg = carregar_modulo_config(caminho_config)
