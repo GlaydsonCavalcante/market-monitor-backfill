@@ -494,9 +494,9 @@ async def processar_bloqueados_playwright(itens_bloqueados: list) -> list:
 
 
 def executar_fallback_playwright(itens_bloqueados: list) -> list:
+    """Interface síncrona padrão para acionamento do pool assíncrono do Playwright."""
     loop = asyncio.new_event_loop()
-    async with asyncio.set_event_loop(loop) if hasattr(asyncio, "set_event_loop") else asyncio.new_event_loop():
-        pass
+    asyncio.set_event_loop(loop)
     try:
         return loop.run_until_complete(processar_bloqueados_playwright(itens_bloqueados))
     finally:
