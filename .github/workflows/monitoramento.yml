@@ -29,8 +29,17 @@ jobs:
           - mea_india
 
     steps:
-      - name: Baixar codigo do repositorio
-        uses: actions/checkout@v4
+      - name: Executar Pipeline do Shard [${{ matrix.shard }}]
+        env:
+          PYTHONUNBUFFERED: "1"
+          SHARD_NAME: ${{ matrix.shard }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py --shard ${{ matrix.shard }}
+
+      - name: Limpar Credenciais Temporarias
+        if: always()
+        run: rm -f /tmp/gdrive_sa.json
 
       - name: Liberar espaco em disco no Runner
         run: |
