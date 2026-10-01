@@ -5,7 +5,7 @@ requests
 pandas
 openpyxl
 trafilatura
-rapidfuzz
 googlenewsdecoder>=0.1.5
 beautifulsoup4>=4.12.0
 playwright>=1.40.0
+rapidfuzz>=3.0.0
