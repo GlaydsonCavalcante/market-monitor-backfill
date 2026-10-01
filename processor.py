@@ -322,48 +322,77 @@ def cluster_articles(
 
 
 def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
-    """Extrai conteúdo do cluster com autocura em cascata: testa a primária e recorre aos espelhos."""
-    urls_to_try = [cluster["url_primaria"]] + cluster.get("urls_espelho", [])
+    """
+    Estágio 1 (HTTP): Itera exaustivamente pela URL primária e por todas as URLs
+    espelho até obter um texto factualmente válido.
+    """
+    urls_to_try = [cluster["url_primaria"]]
+    for esp in cluster.get("urls_espelho", []):
+        if esp and esp not in urls_to_try:
+            urls_to_try.append(esp)
+
     historico = []
     espelhos_decodificados = [resolve_publisher_url(e) for e in cluster.get("urls_espelho", [])]
     titulo = cluster.get("titulo", "")
-    primeira_url = None
+    primeira_url_resolvida = None
     ultimo_motivo = "HTTP_TIMEOUT_OU_BLOQUEIO"
 
     for link in urls_to_try:
         texto, status_http, final_url = scrape_article_text(link, timeout=timeout)
-        if primeira_url is None:
-            primeira_url = final_url
+        if primeira_url_resolvida is None:
+            primeira_url_resolvida = final_url
 
+        # 1. Bloqueio ou falha de conexão HTTP
+        if status_http != "SUCESSO" or not texto:
+            ultimo_motivo = status_http
+            historico.append({
+                "url_original_rss": link,
+                "url_canonica_decodificada": final_url,
+                "status": status_http,
+                "motivo": status_http,
+                "timestamp": datetime.now(FUSO_BRASILIA).strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            continue
+
+        # 2. Validação Factual Preventiva (Shift-Left)
+        apto, motivo = validar_integridade_factual(titulo, texto)
+        if not apto:
+            ultimo_motivo = motivo
+            historico.append({
+                "url_original_rss": link,
+                "url_canonica_decodificada": final_url,
+                "status": f"DESCARTE_FACTUAL_{motivo}",
+                "motivo": motivo,
+                "timestamp": datetime.now(FUSO_BRASILIA).strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            continue
+
+        # 3. Sucesso Factual: Interrompe a busca no cluster imediatamente
         historico.append({
             "url_original_rss": link,
             "url_canonica_decodificada": final_url,
-            "status": status_http,
+            "status": "SUCESSO",
+            "motivo": None,
             "timestamp": datetime.now(FUSO_BRASILIA).strftime("%Y-%m-%d %H:%M:%S"),
         })
 
-        if status_http == "SUCESSO" and texto:
-            apto, motivo = validar_integridade_factual(titulo, texto)
-            if apto:
-                return {
-                    "id_cluster": cluster["id_cluster"],
-                    "tema": cluster["tema"],
-                    "termo_origem": cluster["termo_origem"],
-                    "titulo": titulo,
-                    "data_noticia": cluster["data_noticia"],
-                    "idioma": cluster["idioma"],
-                    "fonte_utilizada": cluster["fonte_principal"],
-                    "url_utilizada": final_url,
-                    "url_canonica_resolvida": final_url,
-                    "urls_espelho_disponiveis": [u for u in espelhos_decodificados if u != final_url],
-                    "status_extracao": "SUCESSO",
-                    "texto_completo": texto,
-                    "motivo_bloqueio": None,
-                    "necessita_extracao_manual": False,
-                    "historico_tentativas": historico,
-                }
-            else:
-                ultimo_motivo = motivo
+        return {
+            "id_cluster": cluster["id_cluster"],
+            "tema": cluster["tema"],
+            "termo_origem": cluster["termo_origem"],
+            "titulo": titulo,
+            "data_noticia": cluster["data_noticia"],
+            "idioma": cluster["idioma"],
+            "fonte_utilizada": cluster["fonte_principal"],
+            "url_utilizada": final_url,
+            "url_canonica_resolvida": final_url,
+            "urls_espelho_disponiveis": [u for u in espelhos_decodificados if u != final_url],
+            "status_extracao": "SUCESSO",
+            "texto_completo": texto,
+            "motivo_bloqueio": None,
+            "necessita_extracao_manual": False,
+            "historico_tentativas": historico,
+        }
 
     return {
         "id_cluster": cluster["id_cluster"],
@@ -373,8 +402,8 @@ def process_cluster_with_fallback(cluster: dict, timeout: int = 6) -> dict:
         "data_noticia": cluster["data_noticia"],
         "idioma": cluster["idioma"],
         "fonte_utilizada": cluster["fonte_principal"],
-        "url_utilizada": primeira_url or cluster["url_primaria"],
-        "url_canonica_resolvida": primeira_url or cluster["url_primaria"],
+        "url_utilizada": primeira_url_resolvida or cluster["url_primaria"],
+        "url_canonica_resolvida": primeira_url_resolvida or cluster["url_primaria"],
         "urls_espelho_disponiveis": espelhos_decodificados,
         "status_extracao": "CONTEUDO_BLOQUEADO",
         "texto_completo": "",
@@ -441,7 +470,10 @@ def gerar_vetores_em_lote(
 
 
 async def _navegar_playwright_item(context, item: dict) -> dict:
-    """Navegação headless assíncrona com fallback em cascata nos espelhos do cluster."""
+    """
+    Estágio 2 (Playwright Stealth): Percorre todas as candidatas em headless browser.
+    Não aborta a busca ao encontrar uma URL terminal; prossegue aos espelhos.
+    """
     url_primaria = item.get("url_canonica_resolvida") or item.get("url_utilizada") or ""
     candidatas = [url_primaria] if url_primaria else []
     for esp in item.get("urls_espelho_disponiveis", []):
@@ -465,12 +497,11 @@ async def _navegar_playwright_item(context, item: dict) -> dict:
 
         await page.route("**/*", interceptar_recursos)
 
-        for url_alvo in candidatas[:2]:
+        for url_alvo in candidatas:
             cat_term = classificar_url_terminal(url_alvo)
             if cat_term:
-                item["status_extracao"] = "CONTEUDO_BLOQUEADO"
-                item["motivo_bloqueio"] = cat_term
-                return item
+                ultimo_motivo = cat_term
+                continue
 
             try:
                 await page.goto(url_alvo, wait_until="domcontentloaded", timeout=9000)
