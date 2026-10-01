@@ -20,7 +20,13 @@ import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
-import googlenewsdecoder
+try:
+    from googlenewsdecoder import gnewsdecoder
+except ImportError:
+    try:
+        from googlenewsdecoder import decoderv1 as gnewsdecoder
+    except ImportError:
+        gnewsdecoder = None
 from rapidfuzz import fuzz
 import requests
 import trafilatura
@@ -158,7 +164,7 @@ def decode_token_offline(token: str) -> Optional[str]:
 
 
 def resolve_publisher_url(google_news_url: str) -> str:
-    """Decodifica URL do Google News combinando rotina offline e decodificador v1."""
+    """Resolve a URL final do veículo jornalístico."""
     if not google_news_url or "news.google.com" not in google_news_url:
         return google_news_url
 
@@ -169,14 +175,15 @@ def resolve_publisher_url(google_news_url: str) -> str:
         if extracted and "google.com" not in extracted:
             return extracted
 
-    try:
-        res = googlenewsdecoder.decoderv1(google_news_url, interval=0.1)
-        if isinstance(res, dict) and res.get("status"):
-            decoded = res.get("decoded_url")
-            if decoded and decoded.startswith("http") and "news.google.com" not in decoded:
-                return decoded
-    except Exception:
-        pass
+    if gnewsdecoder:
+        try:
+            res = gnewsdecoder(google_news_url)
+            if isinstance(res, dict) and (res.get("status") or res.get("success")):
+                decoded = res.get("decoded_url")
+                if decoded and decoded.startswith("http") and "news.google.com" not in decoded:
+                    return decoded
+        except Exception:
+            pass
 
     return google_news_url
 
@@ -492,7 +499,7 @@ async def processar_bloqueados_playwright(itens_bloqueados: list) -> list:
             args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--disable-gpu"],
         )
         context = await browser.new_context(user_agent=random.choice(USER_AGENTS), viewport={"width": 1280, "height": 800})
-        sem = asyncio.Semaphore(4)
+        sem = asyncio.Semaphore(6)
 
         async def _safe_run(item):
             async with sem:
