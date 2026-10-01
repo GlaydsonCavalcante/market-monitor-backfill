@@ -1,11 +1,6 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
-sentence-transformers
 requests
-pandas
-openpyxl
-trafilatura
-googlenewsdecoder>=0.1.5
 beautifulsoup4>=4.12.0
-playwright>=1.40.0
+trafilatura
 rapidfuzz>=3.0.0
+googlenewsdecoder>=0.1.5
+playwright>=1.40.0
