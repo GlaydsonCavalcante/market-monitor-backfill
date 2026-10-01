@@ -52,12 +52,13 @@ jobs:
           playwright install-deps chromium
           sudo apt-get update && sudo apt-get install -y rclone
 
-      - name: Configurar Rclone em Memoria para Acesso ao Drive
+      - name: Configurar Rclone em Memoria para Acesso ao Drive (OAuth)
         env:
-          GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
+          CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
           ID_CONFIGS: ${{ secrets.GDRIVE_CONFIG_FOLDER_ID }}
         run: |
-          echo "$GDRIVE_SA_KEY" > /tmp/gdrive_sa.json
           CLEAN_CONFIGS=$(echo "$ID_CONFIGS" | grep -oE '[a-zA-Z0-9_-]{25,}' | head -n 1)
           if [ -z "$CLEAN_CONFIGS" ]; then CLEAN_CONFIGS="$ID_CONFIGS"; fi
 
@@ -66,11 +67,13 @@ jobs:
           [gdrive_config]
           type = drive
           scope = drive
-          service_account_file = /tmp/gdrive_sa.json
+          client_id = $CLIENT_ID
+          client_secret = $CLIENT_SECRET
+          token = {"access_token":"","token_type":"Bearer","refresh_token":"$REFRESH_TOKEN","expiry":"2026-01-01T00:00:00Z"}
           root_folder_id = $CLEAN_CONFIGS
-          include_shared_with_me = true
           EOF
 
+          
       - name: Executar Pipeline do Shard [${{ matrix.shard }}]
         env:
           PYTHONUNBUFFERED: "1"
